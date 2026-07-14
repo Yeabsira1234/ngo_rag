@@ -1,4 +1,7 @@
-from src.documents import Document, DocumentMetadata
+from dataclasses import replace
+from itertools import count
+
+from src.documents import Document
 
 
 class TextChunker:
@@ -48,19 +51,19 @@ class TextChunker:
     ) -> list[Document]:
         """Chunk documents while preserving their source and page metadata."""
         chunked_documents: list[Document] = []
+        chunk_indices = count()
 
         for document in documents:
             text_chunks = self.split(document.page_content)
             chunked_documents.extend(
                 Document(
                     page_content=text_chunk,
-                    metadata=DocumentMetadata(
-                        source=document.metadata.source,
-                        page_number=document.metadata.page_number,
-                        chunk_index=chunk_index,
+                    metadata=replace(
+                        document.metadata,
+                        chunk_index=next(chunk_indices),
                     ),
                 )
-                for chunk_index, text_chunk in enumerate(text_chunks)
+                for text_chunk in text_chunks
             )
 
         return chunked_documents
