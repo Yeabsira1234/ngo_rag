@@ -1,3 +1,4 @@
+import logging
 import math
 from dataclasses import dataclass
 from enum import Enum
@@ -5,6 +6,9 @@ from typing import Protocol, Sequence
 
 from src.prompting import Prompt
 from src.retrieval import RetrievalResult
+
+
+logger = logging.getLogger(__name__)
 
 
 class RAGStatus(str, Enum):
@@ -105,6 +109,7 @@ class RAGService:
     def answer(self, question: str) -> RAGResponse:
         normalized_question = question.strip()
         if not normalized_question:
+            logger.info("event=rag_invalid_question")
             return RAGResponse(
                 answer=self.INVALID_QUESTION_MESSAGE,
                 citations=(),
@@ -112,21 +117,57 @@ class RAGService:
                 status=RAGStatus.INVALID_QUESTION,
             )
 
-        query_embedding = self.embedding_provider.embed_query(
-            normalized_question
+        question_length = len(normalized_question)
+        try:
+            query_embedding = self.embedding_provider.embed_query(
+                normalized_question
+            )
+        except Exception as error:
+            logger.exception(
+                "event=rag_embedding_failed error_type=%s question_length=%d",
+                type(error).__name__,
+                question_length,
+            )
+            raise
+
+        logger.info(
+            "event=rag_retrieval_started requested_results=%d "
+            "max_distance=%.4f question_length=%d",
+            self.retrieval_result_count,
+            self.retrieval_max_distance,
+            question_length,
         )
-        results = self.retriever.search(
-            query_embedding=query_embedding,
-            number_of_results=self.retrieval_result_count,
-            max_distance=self.retrieval_max_distance,
-        )
+        try:
+            results = self.retriever.search(
+                query_embedding=query_embedding,
+                number_of_results=self.retrieval_result_count,
+                max_distance=self.retrieval_max_distance,
+            )
+        except Exception as error:
+            logger.exception(
+                "event=rag_retrieval_failed error_type=%s question_length=%d",
+                type(error).__name__,
+                question_length,
+            )
+            raise
+
         relevant_results = [
             result
             for result in results
             if result.is_relevant(self.retrieval_max_distance)
         ]
+        logger.info(
+            "event=rag_retrieval_completed returned_results=%d "
+            "relevant_results=%d",
+            len(results),
+            len(relevant_results),
+        )
 
         if not relevant_results:
+            logger.info(
+                "event=rag_insufficient_context question_length=%d",
+                question_length,
+            )
             return RAGResponse(
                 answer=self.INSUFFICIENT_CONTEXT_MESSAGE,
                 citations=(),
@@ -134,11 +175,32 @@ class RAGService:
                 status=RAGStatus.INSUFFICIENT_CONTEXT,
             )
 
-        prompt = self.prompt_builder.build(
-            normalized_question,
-            relevant_results,
+        try:
+            prompt = self.prompt_builder.build(
+                normalized_question,
+                relevant_results,
+            )
+        except Exception as error:
+            logger.exception(
+                "event=rag_prompt_build_failed error_type=%s",
+                type(error).__name__,
+            )
+            raise
+
+        logger.info(
+            "event=rag_llm_invocation_started context_chunks=%d",
+            len(relevant_results),
         )
-        answer = self.answer_generator.generate_answer(prompt)
+        try:
+            answer = self.answer_generator.generate_answer(prompt)
+        except Exception as error:
+            logger.exception(
+                "event=rag_llm_invocation_failed error_type=%s",
+                type(error).__name__,
+            )
+            raise
+
+        logger.info("event=rag_llm_invocation_completed")
         citations = tuple(
             SourceReference.from_retrieval_result(result)
             for result in relevant_results

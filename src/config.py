@@ -25,6 +25,7 @@ class Settings:
     chroma_persist_directory: Path = Path("chroma_data")
     retrieval_result_count: int = 4
     retrieval_max_distance: float = 0.9
+    log_level: str = "INFO"
 
     def __post_init__(self) -> None:
         if not self.openai_api_key.strip():
@@ -53,6 +54,16 @@ class Settings:
         ):
             raise ConfigurationError(
                 "RETRIEVAL_MAX_DISTANCE must be a finite, non-negative value."
+            )
+        if self.log_level not in {
+            "DEBUG",
+            "INFO",
+            "WARNING",
+            "ERROR",
+            "CRITICAL",
+        }:
+            raise ConfigurationError(
+                "LOG_LEVEL must be DEBUG, INFO, WARNING, ERROR, or CRITICAL."
             )
 
     @classmethod
@@ -94,6 +105,7 @@ class Settings:
             retrieval_max_distance=_read_float(
                 env, "RETRIEVAL_MAX_DISTANCE", 0.9
             ),
+            log_level=env.get("LOG_LEVEL", "INFO").strip().upper(),
         )
 
 

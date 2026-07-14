@@ -17,6 +17,7 @@ def test_settings_use_current_application_defaults() -> None:
     assert settings.chroma_persist_directory == Path("chroma_data")
     assert settings.retrieval_result_count == 4
     assert settings.retrieval_max_distance == 0.9
+    assert settings.log_level == "INFO"
 
 
 def test_settings_read_environment_overrides() -> None:
@@ -32,6 +33,7 @@ def test_settings_read_environment_overrides() -> None:
             "CHROMA_PERSIST_DIRECTORY": "vector_data",
             "RETRIEVAL_RESULT_COUNT": "6",
             "RETRIEVAL_MAX_DISTANCE": "0.75",
+            "LOG_LEVEL": "debug",
         }
     )
 
@@ -45,6 +47,7 @@ def test_settings_read_environment_overrides() -> None:
     assert settings.chroma_persist_directory == Path("vector_data")
     assert settings.retrieval_result_count == 6
     assert settings.retrieval_max_distance == 0.75
+    assert settings.log_level == "DEBUG"
 
 
 def test_settings_require_an_api_key() -> None:
@@ -85,5 +88,15 @@ def test_settings_reject_invalid_retrieval_distance() -> None:
             {
                 "OPENAI_API_KEY": "test-key",
                 "RETRIEVAL_MAX_DISTANCE": "-0.1",
+            }
+        )
+
+
+def test_settings_reject_invalid_log_level() -> None:
+    with pytest.raises(ConfigurationError, match="LOG_LEVEL"):
+        Settings.from_env(
+            {
+                "OPENAI_API_KEY": "test-key",
+                "LOG_LEVEL": "VERBOSE",
             }
         )
