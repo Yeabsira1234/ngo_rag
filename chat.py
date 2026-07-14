@@ -1,12 +1,9 @@
 import logging
 
+from src.application import build_rag_service
+from src.chat_history import SAFE_REQUEST_ERROR_MESSAGE
 from src.config import Settings
-from src.embeddings.openai_embeddings import OpenAIEmbeddingService
-from src.llm.openai_llm import OpenAILLMService
 from src.logging_config import configure_logging
-from src.prompting import RAGPromptBuilder
-from src.rag_service import RAGService
-from src.vectorstore.chroma_store import ChromaVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -14,34 +11,7 @@ STARTUP_ERROR_MESSAGE = (
     "The document assistant could not start. Check the application log "
     "for details."
 )
-REQUEST_ERROR_MESSAGE = (
-    "The request could not be completed because a service is unavailable. "
-    "Please try again later."
-)
-
-
-def build_rag_service(settings: Settings) -> RAGService:
-    embedding_service = OpenAIEmbeddingService(
-        api_key=settings.openai_api_key,
-        model=settings.embedding_model,
-    )
-    vector_store = ChromaVectorStore(
-        collection_name=settings.chroma_collection_name,
-        persist_directory=str(settings.chroma_persist_directory),
-    )
-    llm_service = OpenAILLMService(
-        api_key=settings.openai_api_key,
-        model=settings.llm_model,
-    )
-    rag_service = RAGService(
-        embedding_provider=embedding_service,
-        retriever=vector_store,
-        answer_generator=llm_service,
-        prompt_builder=RAGPromptBuilder(),
-        retrieval_result_count=settings.retrieval_result_count,
-        retrieval_max_distance=settings.retrieval_max_distance,
-    )
-    return rag_service
+REQUEST_ERROR_MESSAGE = SAFE_REQUEST_ERROR_MESSAGE
 
 
 def run() -> int:

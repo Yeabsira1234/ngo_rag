@@ -5,9 +5,9 @@ answering questions from PDF documents. The project extracts page-aware text,
 creates OpenAI embeddings, stores them in ChromaDB, retrieves relevant chunks,
 and generates grounded answers with citations.
 
-The current interface is a command-line application. The codebase is organized
-so the RAG service can later support web and API interfaces without moving
-business logic into those presentation layers.
+The project includes both a Streamlit web chat and a command-line interface.
+Both call the same RAG service, keeping retrieval and answer-generation logic
+out of the presentation layers.
 
 ## Current features
 
@@ -20,6 +20,7 @@ business logic into those presentation layers.
 - Typed retrieval and RAG response models
 - Centralized prompt construction and RAG orchestration
 - Safe CLI error handling and structured file logging
+- Streamlit chat interface with visible browser-session history
 - API-key redaction in application logs
 - Unit tests that do not require OpenAI or a real Chroma database
 
@@ -35,7 +36,7 @@ PDF
   -> ChromaVectorStore
 
 Question
-  -> chat.py
+  -> streamlit_app.py or chat.py
   -> RAGService
       -> OpenAIEmbeddingService
       -> ChromaVectorStore (typed results + distance filtering)
@@ -44,15 +45,16 @@ Question
   -> RAGResponse (answer, status, citations, LLM-called flag)
 ```
 
-`chat.py` is intentionally a thin presentation layer. It constructs
-dependencies, reads terminal input, calls `RAGService`, and displays the typed
-response. It does not contain retrieval or prompt-building logic.
+`streamlit_app.py` and `chat.py` are intentionally thin presentation layers.
+They use the same application factory and do not contain retrieval,
+relevance-filtering, or prompt-building logic.
 
 ## Repository structure
 
 ```text
 .
 |-- chat.py                         # Interactive chat CLI
+|-- streamlit_app.py               # Streamlit web chat
 |-- ingest.py                       # PDF ingestion CLI
 |-- requirements.txt               # Direct Python dependencies
 |-- .env.example                   # Safe configuration template
@@ -66,6 +68,8 @@ response. It does not contain retrieval or prompt-building logic.
 |   |-- loaders/pdf_loader.py
 |   |-- vectorstore/chroma_store.py
 |   |-- config.py                   # Typed environment settings
+|   |-- application.py              # Shared dependency factory
+|   |-- chat_history.py             # Visible UI-session message models
 |   |-- documents.py                # Page and chunk document models
 |   |-- logging_config.py           # Centralized logging and redaction
 |   |-- prompting.py                # Provider-independent RAG prompts
@@ -197,6 +201,24 @@ python chat.py
 Enter a document-related question. Use `exit` or `quit` to stop the application.
 The CLI calls `RAGService`; `rag_service.py` is not a standalone executable.
 
+## Running the Streamlit app
+
+Streamlit is installed through `requirements.txt`. After ingestion, start the
+web interface from the repository root:
+
+```bash
+python -m streamlit run streamlit_app.py
+```
+
+Open the local URL printed by Streamlit. The interface displays answers and
+compact source citations, shows the active document and retrieval configuration
+in the sidebar, and provides a button to clear visible chat history.
+
+Streamlit session state preserves messages only so the page can redraw them
+during the current browser session. This is not semantic conversation memory:
+previous messages are not sent to `RAGService` or the LLM, and each question is
+answered independently.
+
 ## Relevance filtering
 
 The current Chroma collection uses L2 distance:
@@ -258,8 +280,8 @@ requests or require the project's persistent Chroma database.
 - Image-only PDFs require OCR, which is not currently implemented.
 - The relevance threshold has not been evaluated on a labeled benchmark.
 - Re-ingestion does not yet remove stale records when chunk identifiers change.
-- There is no conversational memory, authentication, or user authorization.
-- The CLI is the only supported interface.
+- Visible Streamlit history is not conversational memory.
+- There is no authentication or user authorization.
 - OpenAI and local Chroma failures are logged but are not retried.
 - There is no automated RAG evaluation or production monitoring yet.
 
@@ -267,14 +289,13 @@ requests or require the project's persistent Chroma database.
 
 Planned work will be introduced incrementally:
 
-1. Streamlit interface for internal demonstrations
-2. FastAPI service boundary
-3. RAG evaluation datasets, retrieval metrics, and answer-quality evaluation
-4. Agent capabilities and approved tool calling
-5. Docker packaging
-6. Monitoring, tracing, and operational dashboards
-7. CI/CD and security controls
-8. Azure deployment and managed production infrastructure
+1. FastAPI service boundary
+2. RAG evaluation datasets, retrieval metrics, and answer-quality evaluation
+3. Agent capabilities and approved tool calling
+4. Docker packaging
+5. Monitoring, tracing, and operational dashboards
+6. CI/CD and security controls
+7. Azure deployment and managed production infrastructure
 
 Each phase should preserve the typed RAG service as the core application layer
 and add production controls in proportion to deployment risk.
