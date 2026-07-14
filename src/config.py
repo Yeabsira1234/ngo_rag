@@ -18,7 +18,6 @@ class Settings:
     embedding_model: str = "text-embedding-3-small"
     llm_model: str = "gpt-4.1-mini"
     document_path: Path = Path("data/InternationalHandbook.pdf")
-    document_source_name: str = "InternationalHandbook.pdf"
     chunk_size: int = 800
     chunk_overlap: int = 150
     chroma_collection_name: str = "ngo_documents"
@@ -32,8 +31,6 @@ class Settings:
             raise ConfigurationError("OPENAI_EMBEDDING_MODEL must not be empty.")
         if not self.llm_model.strip():
             raise ConfigurationError("OPENAI_LLM_MODEL must not be empty.")
-        if not self.document_source_name.strip():
-            raise ConfigurationError("DOCUMENT_SOURCE_NAME must not be empty.")
         if not self.chroma_collection_name.strip():
             raise ConfigurationError("CHROMA_COLLECTION_NAME must not be empty.")
         if self.chunk_size <= 0:
@@ -73,9 +70,6 @@ class Settings:
             llm_model=env.get("OPENAI_LLM_MODEL", "gpt-4.1-mini"),
             document_path=Path(
                 env.get("DOCUMENT_PATH", "data/InternationalHandbook.pdf")
-            ),
-            document_source_name=env.get(
-                "DOCUMENT_SOURCE_NAME", "InternationalHandbook.pdf"
             ),
             chunk_size=_read_int(env, "CHUNK_SIZE", 800),
             chunk_overlap=_read_int(env, "CHUNK_OVERLAP", 150),

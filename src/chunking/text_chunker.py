@@ -1,3 +1,6 @@
+from src.documents import Document, DocumentMetadata
+
+
 class TextChunker:
     def __init__(
         self,
@@ -19,9 +22,7 @@ class TextChunker:
         self.chunk_overlap = chunk_overlap
 
     def split(self, text: str) -> list[str]:
-        """
-        Divide text into overlapping chunks.
-        """
+        """Divide text into overlapping chunks."""
         cleaned_text = " ".join(text.split())
 
         if not cleaned_text:
@@ -40,3 +41,26 @@ class TextChunker:
             start += self.chunk_size - self.chunk_overlap
 
         return chunks
+
+    def split_documents(
+        self,
+        documents: list[Document],
+    ) -> list[Document]:
+        """Chunk documents while preserving their source and page metadata."""
+        chunked_documents: list[Document] = []
+
+        for document in documents:
+            text_chunks = self.split(document.page_content)
+            chunked_documents.extend(
+                Document(
+                    page_content=text_chunk,
+                    metadata=DocumentMetadata(
+                        source=document.metadata.source,
+                        page_number=document.metadata.page_number,
+                        chunk_index=chunk_index,
+                    ),
+                )
+                for chunk_index, text_chunk in enumerate(text_chunks)
+            )
+
+        return chunked_documents

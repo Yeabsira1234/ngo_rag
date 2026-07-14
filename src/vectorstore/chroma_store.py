@@ -2,6 +2,8 @@ from pathlib import Path
 
 import chromadb
 
+from src.documents import Document
+
 
 class ChromaVectorStore:
     def __init__(
@@ -24,35 +26,45 @@ class ChromaVectorStore:
             )
         )
 
-    def add_chunks(
+    def add_documents(
         self,
-        chunks: list[str],
+        documents: list[Document],
         embeddings: list[list[float]],
-        source: str,
     ) -> None:
-        if len(chunks) != len(embeddings):
+        if len(documents) != len(embeddings):
             raise ValueError(
-                "Each chunk must have one corresponding embedding."
+                "Each document must have one corresponding embedding."
+            )
+
+        if any(
+            document.metadata.chunk_index is None
+            for document in documents
+        ):
+            raise ValueError(
+                "Each stored document must include a chunk_index."
             )
 
         ids = [
-            f"{source}-chunk-{index}"
-            for index in range(len(chunks))
-        ]
-
-        metadatas = [
-            {
-                "source": source,
-                "chunk_index": index,
-            }
-            for index in range(len(chunks))
+            self._document_id(document)
+            for document in documents
         ]
 
         self.collection.upsert(
             ids=ids,
-            documents=chunks,
+            documents=[document.page_content for document in documents],
             embeddings=embeddings,
-            metadatas=metadatas,
+            metadatas=[
+                document.metadata.to_dict()
+                for document in documents
+            ],
+        )
+
+    @staticmethod
+    def _document_id(document: Document) -> str:
+        metadata = document.metadata
+        return (
+            f"{metadata.source}-page-{metadata.page_number}"
+            f"-chunk-{metadata.chunk_index}"
         )
 
     def search(

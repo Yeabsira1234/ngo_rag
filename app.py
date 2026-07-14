@@ -22,17 +22,18 @@ def main() -> None:
         persist_directory=str(settings.chroma_persist_directory),
     )
 
-    document_text = loader.load(str(settings.document_path))
-    chunks = chunker.split(document_text)
+    page_documents = loader.load(settings.document_path)
+    chunks = chunker.split_documents(page_documents)
 
     print(f"Creating embeddings for {len(chunks)} chunks...")
 
-    embeddings = embedding_service.embed_documents(chunks)
+    embeddings = embedding_service.embed_documents(
+        [chunk.page_content for chunk in chunks]
+    )
 
-    vector_store.add_chunks(
-        chunks=chunks,
+    vector_store.add_documents(
+        documents=chunks,
         embeddings=embeddings,
-        source=settings.document_source_name,
     )
 
     print("Document successfully stored in ChromaDB.")

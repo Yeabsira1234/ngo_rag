@@ -21,18 +21,19 @@ def main() -> None:
     )
 
     print("Loading PDF...")
-    document_text = loader.load(str(settings.document_path))
+    page_documents = loader.load(settings.document_path)
 
     print("Creating chunks...")
-    chunks = chunker.split(document_text)
+    chunks = chunker.split_documents(page_documents)
 
     print(f"Creating embeddings for {len(chunks)} chunks...")
-    embeddings = embedding_service.embed_documents(chunks)
+    embeddings = embedding_service.embed_documents(
+        [chunk.page_content for chunk in chunks]
+    )
 
-    vector_store.add_chunks(
-        chunks=chunks,
+    vector_store.add_documents(
+        documents=chunks,
         embeddings=embeddings,
-        source=settings.document_source_name,
     )
 
     print("Ingestion complete.")

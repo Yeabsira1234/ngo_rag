@@ -59,8 +59,12 @@ def main() -> None:
 
         for index, metadata in enumerate(metadatas, start=1):
             source = metadata.get("source", "Unknown source")
+            page_number = metadata.get("page_number", "Unknown")
             chunk_index = metadata.get("chunk_index", "Unknown")
-            print(f"{index}. {source}, chunk {chunk_index}")
+            print(
+                f"{index}. {source}, page {page_number}, "
+                f"chunk {chunk_index}"
+            )
 
         print()
 

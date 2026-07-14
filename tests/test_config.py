@@ -11,7 +11,6 @@ def test_settings_use_current_application_defaults() -> None:
     assert settings.embedding_model == "text-embedding-3-small"
     assert settings.llm_model == "gpt-4.1-mini"
     assert settings.document_path == Path("data/InternationalHandbook.pdf")
-    assert settings.document_source_name == "InternationalHandbook.pdf"
     assert settings.chunk_size == 800
     assert settings.chunk_overlap == 150
     assert settings.chroma_collection_name == "ngo_documents"
@@ -26,7 +25,6 @@ def test_settings_read_environment_overrides() -> None:
             "OPENAI_EMBEDDING_MODEL": "embedding-model",
             "OPENAI_LLM_MODEL": "llm-model",
             "DOCUMENT_PATH": "data/another.pdf",
-            "DOCUMENT_SOURCE_NAME": "another.pdf",
             "CHUNK_SIZE": "1000",
             "CHUNK_OVERLAP": "200",
             "CHROMA_COLLECTION_NAME": "documents",
@@ -39,7 +37,6 @@ def test_settings_read_environment_overrides() -> None:
     assert settings.embedding_model == "embedding-model"
     assert settings.llm_model == "llm-model"
     assert settings.document_path == Path("data/another.pdf")
-    assert settings.document_source_name == "another.pdf"
     assert settings.chunk_size == 1000
     assert settings.chunk_overlap == 200
     assert settings.chroma_collection_name == "documents"
