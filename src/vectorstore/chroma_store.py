@@ -3,6 +3,7 @@ from pathlib import Path
 import chromadb
 
 from src.documents import Document
+from src.retrieval import RetrievalResult
 
 
 class ChromaVectorStore:
@@ -70,9 +71,43 @@ class ChromaVectorStore:
     def search(
         self,
         query_embedding: list[float],
+        *,
         number_of_results: int = 4,
-    ) -> dict:
-        return self.collection.query(
+        max_distance: float,
+    ) -> list[RetrievalResult]:
+        query_results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=number_of_results,
+            include=["documents", "metadatas", "distances"],
         )
+
+        documents = (query_results.get("documents") or [[]])[0]
+        metadatas = (query_results.get("metadatas") or [[]])[0]
+        distances = (query_results.get("distances") or [[]])[0]
+
+        if not (
+            len(documents) == len(metadatas) == len(distances)
+        ):
+            raise ValueError(
+                "Chroma returned inconsistent document, metadata, and "
+                "distance counts."
+            )
+
+        results = [
+            RetrievalResult.from_chroma(
+                chunk_text=document,
+                metadata=metadata,
+                distance=distance,
+            )
+            for document, metadata, distance in zip(
+                documents,
+                metadatas,
+                distances,
+                strict=True,
+            )
+        ]
+        return [
+            result
+            for result in results
+            if result.is_relevant(max_distance)
+        ]

@@ -16,6 +16,7 @@ def test_settings_use_current_application_defaults() -> None:
     assert settings.chroma_collection_name == "ngo_documents"
     assert settings.chroma_persist_directory == Path("chroma_data")
     assert settings.retrieval_result_count == 4
+    assert settings.retrieval_max_distance == 0.9
 
 
 def test_settings_read_environment_overrides() -> None:
@@ -30,6 +31,7 @@ def test_settings_read_environment_overrides() -> None:
             "CHROMA_COLLECTION_NAME": "documents",
             "CHROMA_PERSIST_DIRECTORY": "vector_data",
             "RETRIEVAL_RESULT_COUNT": "6",
+            "RETRIEVAL_MAX_DISTANCE": "0.75",
         }
     )
 
@@ -42,6 +44,7 @@ def test_settings_read_environment_overrides() -> None:
     assert settings.chroma_collection_name == "documents"
     assert settings.chroma_persist_directory == Path("vector_data")
     assert settings.retrieval_result_count == 6
+    assert settings.retrieval_max_distance == 0.75
 
 
 def test_settings_require_an_api_key() -> None:
@@ -74,3 +77,13 @@ def test_api_key_is_not_exposed_in_settings_repr() -> None:
     settings = Settings.from_env({"OPENAI_API_KEY": "super-secret-key"})
 
     assert "super-secret-key" not in repr(settings)
+
+
+def test_settings_reject_invalid_retrieval_distance() -> None:
+    with pytest.raises(ConfigurationError, match="RETRIEVAL_MAX_DISTANCE"):
+        Settings.from_env(
+            {
+                "OPENAI_API_KEY": "test-key",
+                "RETRIEVAL_MAX_DISTANCE": "-0.1",
+            }
+        )

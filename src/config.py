@@ -1,3 +1,4 @@
+import math
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -23,6 +24,7 @@ class Settings:
     chroma_collection_name: str = "ngo_documents"
     chroma_persist_directory: Path = Path("chroma_data")
     retrieval_result_count: int = 4
+    retrieval_max_distance: float = 0.9
 
     def __post_init__(self) -> None:
         if not self.openai_api_key.strip():
@@ -44,6 +46,13 @@ class Settings:
         if self.retrieval_result_count <= 0:
             raise ConfigurationError(
                 "RETRIEVAL_RESULT_COUNT must be greater than zero."
+            )
+        if (
+            not math.isfinite(self.retrieval_max_distance)
+            or self.retrieval_max_distance < 0
+        ):
+            raise ConfigurationError(
+                "RETRIEVAL_MAX_DISTANCE must be a finite, non-negative value."
             )
 
     @classmethod
@@ -82,6 +91,9 @@ class Settings:
             retrieval_result_count=_read_int(
                 env, "RETRIEVAL_RESULT_COUNT", 4
             ),
+            retrieval_max_distance=_read_float(
+                env, "RETRIEVAL_MAX_DISTANCE", 0.9
+            ),
         )
 
 
@@ -99,4 +111,21 @@ def _read_int(
     except ValueError as error:
         raise ConfigurationError(
             f"{variable_name} must be a valid integer."
+        ) from error
+
+
+def _read_float(
+    env: Mapping[str, str],
+    variable_name: str,
+    default: float,
+) -> float:
+    raw_value = env.get(variable_name)
+    if raw_value is None:
+        return default
+
+    try:
+        return float(raw_value)
+    except ValueError as error:
+        raise ConfigurationError(
+            f"{variable_name} must be a valid number."
         ) from error

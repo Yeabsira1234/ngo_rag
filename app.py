@@ -47,15 +47,14 @@ def main() -> None:
     results = vector_store.search(
         query_embedding=question_embedding,
         number_of_results=settings.retrieval_result_count,
+        max_distance=settings.retrieval_max_distance,
     )
 
     print("\nMost relevant passages:\n")
 
-    documents = results["documents"][0]
-
-    for index, document in enumerate(documents, start=1):
+    for index, result in enumerate(results, start=1):
         print(f"Result {index}:")
-        print(document)
+        print(result.chunk_text)
         print("-" * 80)
 
 

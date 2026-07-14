@@ -1,7 +1,38 @@
 from src.config import Settings
 from src.embeddings.openai_embeddings import OpenAIEmbeddingService
 from src.llm.openai_llm import OpenAILLMService
+from src.retrieval import RetrievalResult
 from src.vectorstore.chroma_store import ChromaVectorStore
+
+NO_RELEVANT_RESULTS_MESSAGE = (
+    "I could not find enough relevant information in the documents "
+    "to answer that question."
+)
+
+
+def answer_question(
+    question: str,
+    embedding_service: OpenAIEmbeddingService,
+    vector_store: ChromaVectorStore,
+    llm_service: OpenAILLMService,
+    settings: Settings,
+) -> tuple[str, list[RetrievalResult]]:
+    """Retrieve relevant context and generate a grounded answer."""
+    question_embedding = embedding_service.embed_query(question)
+    results = vector_store.search(
+        query_embedding=question_embedding,
+        number_of_results=settings.retrieval_result_count,
+        max_distance=settings.retrieval_max_distance,
+    )
+
+    if not results:
+        return NO_RELEVANT_RESULTS_MESSAGE, []
+
+    answer = llm_service.generate_answer(
+        question=question,
+        context_chunks=[result.chunk_text for result in results],
+    )
+    return answer, results
 
 
 def main() -> None:
@@ -33,37 +64,24 @@ def main() -> None:
             print("Please enter a question.\n")
             continue
 
-        question_embedding = embedding_service.embed_query(question)
-
-        results = vector_store.search(
-            query_embedding=question_embedding,
-            number_of_results=settings.retrieval_result_count,
-        )
-
-        documents = results.get("documents", [[]])[0]
-
-        if not documents:
-            print("\nNo relevant document passages were found.\n")
-            continue
-
-        answer = llm_service.generate_answer(
+        answer, results = answer_question(
             question=question,
-            context_chunks=documents,
+            embedding_service=embedding_service,
+            vector_store=vector_store,
+            llm_service=llm_service,
+            settings=settings,
         )
 
         print("\nAnswer:")
         print(answer)
 
-        print("\nSources retrieved:")
-        metadatas = results.get("metadatas", [[]])[0]
+        if results:
+            print("\nSources retrieved:")
 
-        for index, metadata in enumerate(metadatas, start=1):
-            source = metadata.get("source", "Unknown source")
-            page_number = metadata.get("page_number", "Unknown")
-            chunk_index = metadata.get("chunk_index", "Unknown")
+        for index, result in enumerate(results, start=1):
             print(
-                f"{index}. {source}, page {page_number}, "
-                f"chunk {chunk_index}"
+                f"{index}. {result.source}, page {result.page_number}, "
+                f"chunk {result.chunk_index}, distance {result.distance:.4f}"
             )
 
         print()
