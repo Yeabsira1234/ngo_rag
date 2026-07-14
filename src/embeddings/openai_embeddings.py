@@ -2,6 +2,8 @@ from openai import OpenAI
 
 
 class OpenAIEmbeddingService:
+    """Create document and query embeddings with the OpenAI API."""
+
     def __init__(
         self,
         api_key: str,

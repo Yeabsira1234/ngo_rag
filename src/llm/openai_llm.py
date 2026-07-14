@@ -4,6 +4,8 @@ from src.prompting import Prompt
 
 
 class OpenAILLMService:
+    """Generate an answer from a provider-independent prompt using OpenAI."""
+
     def __init__(
         self,
         api_key: str,

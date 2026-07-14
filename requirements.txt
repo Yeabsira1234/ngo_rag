@@ -1,6 +1,5 @@
-openai
-chromadb
-pymupdf
-python-dotenv
-streamlit
-pytest
+openai>=2.45,<3
+chromadb>=1.5,<2
+PyMuPDF>=1.28,<2
+python-dotenv>=1.2,<2
+pytest>=9.1,<10

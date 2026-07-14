@@ -6,6 +6,8 @@ from src.documents import Document, DocumentMetadata
 
 
 class PDFLoader:
+    """Extract text and source metadata from each page of a PDF."""
+
     def load(self, pdf_path: str | Path) -> list[Document]:
         """Load a PDF as one document per page."""
         path = Path(pdf_path)

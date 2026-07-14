@@ -18,7 +18,7 @@ class Settings:
     openai_api_key: str = field(repr=False)
     embedding_model: str = "text-embedding-3-small"
     llm_model: str = "gpt-4.1-mini"
-    document_path: Path = Path("data/InternationalHandbook.pdf")
+    document_path: Path = Path("data/samples/sample_document.pdf")
     chunk_size: int = 800
     chunk_overlap: int = 150
     chroma_collection_name: str = "ngo_documents"
@@ -89,7 +89,7 @@ class Settings:
             ),
             llm_model=env.get("OPENAI_LLM_MODEL", "gpt-4.1-mini"),
             document_path=Path(
-                env.get("DOCUMENT_PATH", "data/InternationalHandbook.pdf")
+                env.get("DOCUMENT_PATH", "data/samples/sample_document.pdf")
             ),
             chunk_size=_read_int(env, "CHUNK_SIZE", 800),
             chunk_overlap=_read_int(env, "CHUNK_OVERLAP", 150),

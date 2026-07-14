@@ -7,6 +7,8 @@ from src.retrieval import RetrievalResult
 
 
 class ChromaVectorStore:
+    """Persist embedded chunks and perform typed similarity searches."""
+
     def __init__(
         self,
         collection_name: str = "ngo_documents",

@@ -1,8 +1,37 @@
-.venv/
+# Environment and secrets
 .env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyd
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Generated application data
 chroma_data/
 logs/
+
+# Documents are private by default. Only reviewed samples may be committed.
+data/**/*.pdf
+!data/samples/
+!data/samples/*.pdf
 data/private/
+
+# Editors
+.vscode/
+.idea/
+*.code-workspace
+
+# Operating systems
+.DS_Store
+Thumbs.db
+Desktop.ini

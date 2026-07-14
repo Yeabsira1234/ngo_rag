@@ -10,7 +10,7 @@ def test_settings_use_current_application_defaults() -> None:
 
     assert settings.embedding_model == "text-embedding-3-small"
     assert settings.llm_model == "gpt-4.1-mini"
-    assert settings.document_path == Path("data/InternationalHandbook.pdf")
+    assert settings.document_path == Path("data/samples/sample_document.pdf")
     assert settings.chunk_size == 800
     assert settings.chunk_overlap == 150
     assert settings.chroma_collection_name == "ngo_documents"

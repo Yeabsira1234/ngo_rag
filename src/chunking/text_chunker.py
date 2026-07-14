@@ -5,6 +5,8 @@ from src.documents import Document
 
 
 class TextChunker:
+    """Split page documents into overlapping, metadata-preserving chunks."""
+
     def __init__(
         self,
         chunk_size: int = 800,
