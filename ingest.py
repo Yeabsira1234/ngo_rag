@@ -1,7 +1,5 @@
 from src.chunking.text_chunker import TextChunker
-from src.embeddings.openai_embeddings import (
-    OpenAIEmbeddingService,
-)
+from src.embeddings.openai_embeddings import OpenAIEmbeddingService
 from src.loaders.pdf_loader import PDFLoader
 from src.vectorstore.chroma_store import ChromaVectorStore
 
@@ -19,11 +17,13 @@ def main() -> None:
     embedding_service = OpenAIEmbeddingService()
     vector_store = ChromaVectorStore()
 
+    print("Loading PDF...")
     document_text = loader.load(PDF_PATH)
+
+    print("Creating chunks...")
     chunks = chunker.split(document_text)
 
     print(f"Creating embeddings for {len(chunks)} chunks...")
-
     embeddings = embedding_service.embed_documents(chunks)
 
     vector_store.add_chunks(
@@ -32,27 +32,8 @@ def main() -> None:
         source=SOURCE_NAME,
     )
 
-    print("Document successfully stored in ChromaDB.")
-
-    question = input("\nAsk a question: ")
-
-    question_embedding = embedding_service.embed_query(
-        question
-    )
-
-    results = vector_store.search(
-        query_embedding=question_embedding,
-        number_of_results=4,
-    )
-
-    print("\nMost relevant passages:\n")
-
-    documents = results["documents"][0]
-
-    for index, document in enumerate(documents, start=1):
-        print(f"Result {index}:")
-        print(document)
-        print("-" * 80)
+    print("Ingestion complete.")
+    print(f"Stored {len(chunks)} chunks in ChromaDB.")
 
 
 if __name__ == "__main__":
