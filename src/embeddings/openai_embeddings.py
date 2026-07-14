@@ -1,22 +1,14 @@
-import os
-
-from dotenv import load_dotenv
 from openai import OpenAI
 
 
 class OpenAIEmbeddingService:
     def __init__(
         self,
-        model: str = "text-embedding-3-small",
+        api_key: str,
+        model: str,
     ) -> None:
-        load_dotenv()
-
-        api_key = os.getenv("OPENAI_API_KEY")
-
         if not api_key:
-            raise ValueError(
-                "OPENAI_API_KEY was not found in the .env file."
-            )
+            raise ValueError("api_key cannot be empty.")
 
         self.client = OpenAI(api_key=api_key)
         self.model = model

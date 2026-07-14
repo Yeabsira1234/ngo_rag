@@ -1,12 +1,23 @@
+from src.config import Settings
 from src.embeddings.openai_embeddings import OpenAIEmbeddingService
 from src.llm.openai_llm import OpenAILLMService
 from src.vectorstore.chroma_store import ChromaVectorStore
 
 
 def main() -> None:
-    embedding_service = OpenAIEmbeddingService()
-    vector_store = ChromaVectorStore()
-    llm_service = OpenAILLMService()
+    settings = Settings.from_env()
+    embedding_service = OpenAIEmbeddingService(
+        api_key=settings.openai_api_key,
+        model=settings.embedding_model,
+    )
+    vector_store = ChromaVectorStore(
+        collection_name=settings.chroma_collection_name,
+        persist_directory=str(settings.chroma_persist_directory),
+    )
+    llm_service = OpenAILLMService(
+        api_key=settings.openai_api_key,
+        model=settings.llm_model,
+    )
 
     print("Document assistant is ready.")
     print("Type 'exit' to stop.\n")
@@ -26,7 +37,7 @@ def main() -> None:
 
         results = vector_store.search(
             query_embedding=question_embedding,
-            number_of_results=4,
+            number_of_results=settings.retrieval_result_count,
         )
 
         documents = results.get("documents", [[]])[0]
