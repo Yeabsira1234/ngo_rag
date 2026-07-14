@@ -1,38 +1,9 @@
 from src.config import Settings
 from src.embeddings.openai_embeddings import OpenAIEmbeddingService
 from src.llm.openai_llm import OpenAILLMService
-from src.retrieval import RetrievalResult
+from src.prompting import RAGPromptBuilder
+from src.rag_service import RAGService
 from src.vectorstore.chroma_store import ChromaVectorStore
-
-NO_RELEVANT_RESULTS_MESSAGE = (
-    "I could not find enough relevant information in the documents "
-    "to answer that question."
-)
-
-
-def answer_question(
-    question: str,
-    embedding_service: OpenAIEmbeddingService,
-    vector_store: ChromaVectorStore,
-    llm_service: OpenAILLMService,
-    settings: Settings,
-) -> tuple[str, list[RetrievalResult]]:
-    """Retrieve relevant context and generate a grounded answer."""
-    question_embedding = embedding_service.embed_query(question)
-    results = vector_store.search(
-        query_embedding=question_embedding,
-        number_of_results=settings.retrieval_result_count,
-        max_distance=settings.retrieval_max_distance,
-    )
-
-    if not results:
-        return NO_RELEVANT_RESULTS_MESSAGE, []
-
-    answer = llm_service.generate_answer(
-        question=question,
-        context_chunks=[result.chunk_text for result in results],
-    )
-    return answer, results
 
 
 def main() -> None:
@@ -49,6 +20,14 @@ def main() -> None:
         api_key=settings.openai_api_key,
         model=settings.llm_model,
     )
+    rag_service = RAGService(
+        embedding_provider=embedding_service,
+        retriever=vector_store,
+        answer_generator=llm_service,
+        prompt_builder=RAGPromptBuilder(),
+        retrieval_result_count=settings.retrieval_result_count,
+        retrieval_max_distance=settings.retrieval_max_distance,
+    )
 
     print("Document assistant is ready.")
     print("Type 'exit' to stop.\n")
@@ -64,24 +43,19 @@ def main() -> None:
             print("Please enter a question.\n")
             continue
 
-        answer, results = answer_question(
-            question=question,
-            embedding_service=embedding_service,
-            vector_store=vector_store,
-            llm_service=llm_service,
-            settings=settings,
-        )
+        response = rag_service.answer(question)
 
         print("\nAnswer:")
-        print(answer)
+        print(response.answer)
 
-        if results:
+        if response.citations:
             print("\nSources retrieved:")
 
-        for index, result in enumerate(results, start=1):
+        for index, citation in enumerate(response.citations, start=1):
             print(
-                f"{index}. {result.source}, page {result.page_number}, "
-                f"chunk {result.chunk_index}, distance {result.distance:.4f}"
+                f"{index}. {citation.source}, page {citation.page_number}, "
+                f"chunk {citation.chunk_index}, "
+                f"distance {citation.distance:.4f}"
             )
 
         print()
