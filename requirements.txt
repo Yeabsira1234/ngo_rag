@@ -6,3 +6,4 @@ streamlit>=1.59,<2
 fastapi>=0.139,<0.140
 uvicorn>=0.51,<0.52
 pytest>=9.1,<10
+pyodbc>=5.2,<6

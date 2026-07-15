@@ -1,3 +1,4 @@
+import json
 from collections.abc import Mapping
 from typing import Any, Protocol
 
@@ -14,6 +15,8 @@ from src.agent.organization_data import (
     SampleOrganizationInfo,
 )
 from src.rag_service import RAGService
+from src.sql.models import SQLOperation
+from src.sql.repository import SQLServerRepository, SQLToolError
 
 
 class AgentTool(Protocol):
@@ -157,4 +160,77 @@ class OrganizationInfoTool:
             source=self.NAME,
             provenance=ToolProvenance.STRUCTURED_ORGANIZATION_DATA,
             category=category.value,
+        )
+
+
+class SQLQueryTool:
+    """Expose only predefined, parameterized, read-only SQL operations."""
+
+    NAME = "sql_query"
+    SAFE_ERROR_MESSAGE = (
+        "The structured database request could not be completed safely."
+    )
+
+    def __init__(self, repository: SQLServerRepository) -> None:
+        self.repository = repository
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.NAME,
+            description=(
+                "Query the structured NGO database using one predefined "
+                "read-only operation. Use office_name only for office-filtered "
+                "operations and language only for count_clients_by_language."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "enum": [operation.value for operation in SQLOperation],
+                    },
+                    "office_name": {"type": ["string", "null"]},
+                    "language": {"type": ["string", "null"]},
+                },
+                "required": ["operation", "office_name", "language"],
+                "additionalProperties": False,
+            },
+        )
+
+    def execute(self, arguments: Mapping[str, Any]) -> ToolExecutionResult:
+        raw_operation = arguments.get("operation")
+        if not isinstance(raw_operation, str):
+            raise ValueError("sql_query operation must be a string.")
+        try:
+            operation = SQLOperation(raw_operation)
+        except ValueError as error:
+            raise ValueError("Unknown sql_query operation.") from error
+        if set(arguments) != {"operation", "office_name", "language"}:
+            raise ValueError("sql_query received malformed arguments.")
+        parameters = {
+            key: value
+            for key, value in arguments.items()
+            if key != "operation" and value is not None
+        }
+        try:
+            result = self.repository.execute(operation, parameters)
+        except SQLToolError:
+            return ToolExecutionResult(
+                answer=self.SAFE_ERROR_MESSAGE,
+                status=ToolExecutionStatus.ERROR,
+                citations=(),
+                rag_llm_called=False,
+                source=self.NAME,
+                provenance=ToolProvenance.STRUCTURED_SQL_DATA,
+                category=operation.value,
+            )
+        return ToolExecutionResult(
+            answer=json.dumps(result.to_model_output(), default=str),
+            status=ToolExecutionStatus.ANSWERED,
+            citations=(),
+            rag_llm_called=False,
+            source=self.NAME,
+            provenance=ToolProvenance.STRUCTURED_SQL_DATA,
+            category=operation.value,
         )

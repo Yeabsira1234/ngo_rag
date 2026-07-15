@@ -51,12 +51,13 @@ class AgentService:
     )
     DEPENDENCY_ERROR_MESSAGE = "The agent could not complete the request."
     INSTRUCTIONS = (
-        "You are a helpful assistant with two tools. Use document_search for "
+        "You are a helpful assistant with three tools. Use document_search for "
         "questions about contents, policies, procedures, or facts in the indexed "
         "document. Use organization_info for structured facts in the fictional "
         "sample organization directory, such as its name, support hours, contact "
-        "email, location, or service categories. Answer directly only when neither "
-        "tool is necessary. Do not invent document or organization facts."
+        "email, location, or service categories. Use sql_query for structured "
+        "questions about offices, programs, staff, clients, cases, or service "
+        "events. Answer directly only when no tool is necessary. Do not invent facts."
     )
 
     def __init__(
@@ -127,6 +128,8 @@ class AgentService:
                     in used_provenance
                 ):
                     status = AgentStatus.ORGANIZATION_ANSWER
+                elif ToolProvenance.STRUCTURED_SQL_DATA in used_provenance:
+                    status = AgentStatus.SQL_ANSWER
                 else:
                     status = AgentStatus.DIRECT_ANSWER
                 response = AgentResponse(

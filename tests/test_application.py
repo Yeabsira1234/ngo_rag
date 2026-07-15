@@ -58,6 +58,9 @@ def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> Non
     model = object()
     document_tool = object()
     organization_tool = object()
+    sql_tool = object()
+    sql_repository = object()
+    connection_factory = object()
     memory = object()
     agent_service = object()
 
@@ -66,6 +69,9 @@ def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> Non
     model_class = Mock(return_value=model)
     tool_class = Mock(return_value=document_tool)
     organization_tool_class = Mock(return_value=organization_tool)
+    sql_tool_class = Mock(return_value=sql_tool)
+    repository_class = Mock(return_value=sql_repository)
+    connection_factory_builder = Mock(return_value=connection_factory)
     agent_class = Mock(return_value=agent_service)
     memory_class = Mock(return_value=memory)
     monkeypatch.setattr(application, "OpenAI", openai_class)
@@ -77,6 +83,9 @@ def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> Non
         organization_tool_class,
     )
     monkeypatch.setattr(application, "AgentService", agent_class)
+    monkeypatch.setattr(application, "SQLQueryTool", sql_tool_class)
+    monkeypatch.setattr(application, "SQLServerRepository", repository_class)
+    monkeypatch.setattr(application, "build_connection_factory", connection_factory_builder)
     monkeypatch.setattr(application, "InMemoryConversationMemory", memory_class)
 
     result = application.build_agent_service(settings)
@@ -89,12 +98,19 @@ def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> Non
     )
     tool_class.assert_called_once_with(rag_service)
     organization_tool_class.assert_called_once_with()
+    connection_factory_builder.assert_called_once_with(settings)
+    repository_class.assert_called_once_with(
+        connection_factory,
+        timeout_seconds=settings.sql_query_timeout_seconds,
+        max_rows=settings.sql_max_rows,
+    )
+    sql_tool_class.assert_called_once_with(sql_repository)
     memory_class.assert_called_once_with(
         max_turns=settings.agent_memory_max_turns
     )
     agent_class.assert_called_once_with(
         model=model,
-        tools=(document_tool, organization_tool),
+        tools=(document_tool, organization_tool, sql_tool),
         memory=memory,
         max_tool_iterations=settings.agent_max_tool_iterations,
     )

@@ -71,6 +71,7 @@ class AgentStatus(str, Enum):
     DIRECT_ANSWER = "direct_answer"
     DOCUMENT_ANSWER = "document_answer"
     ORGANIZATION_ANSWER = "organization_answer"
+    SQL_ANSWER = "sql_answer"
     INVALID_QUESTION = "invalid_question"
     TOOL_ERROR = "tool_error"
     MAX_ITERATIONS = "max_iterations"
@@ -92,6 +93,7 @@ class ToolExecutionStatus(str, Enum):
     INSUFFICIENT_CONTEXT = "insufficient_context"
     INVALID_QUESTION = "invalid_question"
     NOT_FOUND = "not_found"
+    ERROR = "error"
 
     @classmethod
     def from_rag_status(cls, status: RAGStatus) -> "ToolExecutionStatus":
@@ -101,6 +103,7 @@ class ToolExecutionStatus(str, Enum):
 class ToolProvenance(str, Enum):
     DOCUMENT = "document"
     STRUCTURED_ORGANIZATION_DATA = "structured_organization_data"
+    STRUCTURED_SQL_DATA = "structured_sql_data"
 
 
 @dataclass(frozen=True, slots=True)

@@ -3,13 +3,15 @@ from openai import OpenAI
 from src.agent.openai_model import OpenAIAgentModel
 from src.agent.memory import InMemoryConversationMemory
 from src.agent.service import AgentService
-from src.agent.tools import DocumentSearchTool, OrganizationInfoTool
+from src.agent.tools import DocumentSearchTool, OrganizationInfoTool, SQLQueryTool
 from src.config import Settings
 from src.embeddings.openai_embeddings import OpenAIEmbeddingService
 from src.llm.openai_llm import OpenAILLMService
 from src.prompting import RAGPromptBuilder
 from src.rag_service import RAGService
 from src.vectorstore.chroma_store import ChromaVectorStore
+from src.sql.connection import build_connection_factory
+from src.sql.repository import SQLServerRepository
 
 
 def build_rag_service(settings: Settings) -> RAGService:
@@ -46,7 +48,17 @@ def build_agent_service(settings: Settings) -> AgentService:
     )
     return AgentService(
         model=model,
-        tools=(DocumentSearchTool(rag_service), OrganizationInfoTool()),
+        tools=(
+            DocumentSearchTool(rag_service),
+            OrganizationInfoTool(),
+            SQLQueryTool(
+                SQLServerRepository(
+                    build_connection_factory(settings),
+                    timeout_seconds=settings.sql_query_timeout_seconds,
+                    max_rows=settings.sql_max_rows,
+                )
+            ),
+        ),
         memory=InMemoryConversationMemory(
             max_turns=settings.agent_memory_max_turns
         ),

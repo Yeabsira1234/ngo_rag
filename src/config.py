@@ -27,6 +27,13 @@ class Settings:
     retrieval_max_distance: float = 0.9
     agent_max_tool_iterations: int = 2
     agent_memory_max_turns: int = 10
+    sql_server: str = "YEABSIRA"
+    sql_database: str = "NGO_RAG"
+    sql_driver: str = "ODBC Driver 18 for SQL Server"
+    sql_trusted_connection: bool = True
+    sql_trust_server_certificate: bool = True
+    sql_query_timeout_seconds: int = 10
+    sql_max_rows: int = 100
     log_level: str = "INFO"
 
     def __post_init__(self) -> None:
@@ -65,6 +72,14 @@ class Settings:
             raise ConfigurationError(
                 "AGENT_MEMORY_MAX_TURNS must be greater than zero."
             )
+        if not self.sql_server.strip() or not self.sql_database.strip():
+            raise ConfigurationError("SQL_SERVER and SQL_DATABASE must not be empty.")
+        if not self.sql_driver.strip():
+            raise ConfigurationError("SQL_DRIVER must not be empty.")
+        if self.sql_query_timeout_seconds <= 0:
+            raise ConfigurationError("SQL_QUERY_TIMEOUT_SECONDS must be greater than zero.")
+        if self.sql_max_rows <= 0:
+            raise ConfigurationError("SQL_MAX_ROWS must be greater than zero.")
         if self.log_level not in {
             "DEBUG",
             "INFO",
@@ -121,6 +136,17 @@ class Settings:
             agent_memory_max_turns=_read_int(
                 env, "AGENT_MEMORY_MAX_TURNS", 10
             ),
+            sql_server=env.get("SQL_SERVER", "YEABSIRA"),
+            sql_database=env.get("SQL_DATABASE", "NGO_RAG"),
+            sql_driver=env.get("SQL_DRIVER", "ODBC Driver 18 for SQL Server"),
+            sql_trusted_connection=_read_bool(env, "SQL_TRUSTED_CONNECTION", True),
+            sql_trust_server_certificate=_read_bool(
+                env, "SQL_TRUST_SERVER_CERTIFICATE", True
+            ),
+            sql_query_timeout_seconds=_read_int(
+                env, "SQL_QUERY_TIMEOUT_SECONDS", 10
+            ),
+            sql_max_rows=_read_int(env, "SQL_MAX_ROWS", 100),
             log_level=env.get("LOG_LEVEL", "INFO").strip().upper(),
         )
 
@@ -157,3 +183,17 @@ def _read_float(
         raise ConfigurationError(
             f"{variable_name} must be a valid number."
         ) from error
+
+
+def _read_bool(
+    env: Mapping[str, str], variable_name: str, default: bool
+) -> bool:
+    raw_value = env.get(variable_name)
+    if raw_value is None:
+        return default
+    normalized = raw_value.strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    raise ConfigurationError(f"{variable_name} must be true or false.")

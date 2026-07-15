@@ -410,6 +410,38 @@ python -m pytest -q
 The unit tests use mocks or temporary local resources. They do not make OpenAI
 requests or require the project's persistent Chroma database.
 
+## Read-only SQL Server agent tool
+
+The agent can answer structured questions from the local `NGO_RAG` SQL Server
+database through the `sql_query` tool. Install Microsoft ODBC Driver 18 for SQL
+Server on the machine before using it. Local development uses Windows
+Authentication; no database password is stored in source code.
+
+Configure `.env` locally (the application never writes this file):
+
+```env
+SQL_SERVER=YEABSIRA
+SQL_DATABASE=NGO_RAG
+SQL_DRIVER=ODBC Driver 18 for SQL Server
+SQL_TRUSTED_CONNECTION=true
+SQL_TRUST_SERVER_CERTIFICATE=true
+SQL_QUERY_TIMEOUT_SECONDS=10
+SQL_MAX_ROWS=100
+```
+
+Supported operations are `list_offices`, `list_programs`,
+`count_cases_by_status`, `list_programs_by_office`, `list_staff_by_office`,
+`list_open_cases`, `count_clients_by_language`, and
+`recent_service_events`. Each operation maps to fixed read-only SQL with
+explicit columns, parameterized values, deterministic ordering, a timeout, and
+a maximum result size. Arbitrary SQL, stored procedures, and write operations
+are not accepted.
+
+Example agent questions include “How many open cases are there?”, “Which
+programs are offered by the Northern Virginia Office?”, “How many clients
+prefer Amharic?”, and “What recent services were provided?”. Unrestricted
+natural-language-to-SQL is intentionally deferred to a later step.
+
 ## Known limitations
 
 - One configured PDF is ingested per command invocation.
@@ -418,8 +450,8 @@ requests or require the project's persistent Chroma database.
 - The relevance threshold has not been evaluated on a labeled benchmark.
 - Re-ingestion does not yet remove stale records when chunk identifiers change.
 - Visible Streamlit history is not conversational memory.
-- The agent has only document-search and fictional organization-information
-  tools.
+- The agent has document-search, fictional organization-information, and
+  predefined read-only SQL tools only.
 - Structured organization data is static sample data, not a production system
   of record.
 - Agent memory is not shared across processes and is not durable.
@@ -433,8 +465,8 @@ requests or require the project's persistent Chroma database.
 Planned work will be introduced incrementally:
 
 1. RAG evaluation datasets, retrieval metrics, and answer-quality evaluation
-2. Approved production tools such as read-only SQL Server queries and approved
-   organizational APIs
+2. Approved production tools such as additional organizational APIs and
+   carefully governed natural-language-to-SQL
 3. Docker packaging
 4. Monitoring, tracing, and operational dashboards
 5. CI/CD and security controls

@@ -19,6 +19,10 @@ def test_settings_use_current_application_defaults() -> None:
     assert settings.retrieval_max_distance == 0.9
     assert settings.agent_max_tool_iterations == 2
     assert settings.agent_memory_max_turns == 10
+    assert settings.sql_server == "YEABSIRA"
+    assert settings.sql_database == "NGO_RAG"
+    assert settings.sql_query_timeout_seconds == 10
+    assert settings.sql_max_rows == 100
     assert settings.log_level == "INFO"
 
 
