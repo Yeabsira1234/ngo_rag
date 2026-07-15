@@ -12,12 +12,16 @@ from src.agent.memory import (
 )
 from src.agent.models import (
     AgentCitation,
+    EvidenceRecord,
+    ExecutionPlan,
     AgentModelInput,
     AgentModelResponse,
     AgentResponse,
     AgentStatus,
+    PlanStep,
     ToolDefinition,
     ToolExecutionResult,
+    ToolExecutionStatus,
     ToolProvenance,
 )
 from src.agent.tools import ToolRegistry
@@ -51,6 +55,9 @@ class AgentTurnState(TypedDict, total=False):
     user_message: ConversationMessage
     model_response: AgentModelResponse
     pending_tool_calls: tuple[Any, ...]
+    execution_plan: ExecutionPlan
+    completed_tool_results: list[EvidenceRecord]
+    evidence_by_source: dict[str, list[EvidenceRecord]]
     tool_output_items: list[dict[str, Any]]
     citations: list[AgentCitation]
     tool_sources: list[str]
@@ -58,6 +65,7 @@ class AgentTurnState(TypedDict, total=False):
     executed_call_fingerprints: list[str]
     natural_language_sql_executed: bool
     iteration: int
+    tool_call_count: int
     route: str
     status: AgentStatus
     final_answer: str
@@ -74,6 +82,9 @@ class AgentTurnGraph:
     MAX_ITERATIONS_MESSAGE = (
         "The agent stopped because it reached its tool-call safety limit."
     )
+    MAX_TOOL_CALLS_MESSAGE = (
+        "The agent stopped because its execution plan exceeded the per-turn tool-call limit."
+    )
     REPEATED_TOOL_CALL_MESSAGE = (
         "The agent stopped because it repeated an equivalent tool request."
     )
@@ -88,6 +99,7 @@ class AgentTurnGraph:
         memory: ConversationMemory,
         instructions: str,
         max_tool_iterations: int,
+        max_tool_calls_per_turn: int,
     ) -> None:
         self.model = model
         self.tool_registry = tool_registry
@@ -95,6 +107,7 @@ class AgentTurnGraph:
         self.memory = memory
         self.instructions = instructions
         self.max_tool_iterations = max_tool_iterations
+        self.max_tool_calls_per_turn = max_tool_calls_per_turn
         self._dependency_error: Exception | None = None
         self.compiled = self._build().compile()
 
@@ -110,7 +123,10 @@ class AgentTurnGraph:
             "used_provenance": [],
             "executed_call_fingerprints": [],
             "natural_language_sql_executed": False,
+            "completed_tool_results": [],
+            "evidence_by_source": {},
             "iteration": 0,
+            "tool_call_count": 0,
             "should_commit": False,
         }
         logger.info(
@@ -136,9 +152,11 @@ class AgentTurnGraph:
         graph.add_node("validate_input", self.validate_input)
         graph.add_node("call_model", self.call_model)
         graph.add_node("route_model_output", self.route_model_output)
+        graph.add_node("create_execution_plan", self.create_execution_plan)
         graph.add_node("execute_tools", self.execute_tools)
         graph.add_node("record_tool_results", self.record_tool_results)
         graph.add_node("check_iteration_limit", self.check_iteration_limit)
+        graph.add_node("synthesize_response", self.synthesize_response)
         graph.add_node("finalize_response", self.finalize_response)
         graph.add_node("finalize_limit_reached", self.finalize_limit_reached)
         graph.add_node("handle_dependency_failure", self.handle_dependency_failure)
@@ -155,11 +173,16 @@ class AgentTurnGraph:
             lambda state: state["route"],
             {
                 "direct": "finalize_response",
-                "tools": "execute_tools",
+                "tools": "create_execution_plan",
                 "limit": "finalize_limit_reached",
                 "dependency": "handle_dependency_failure",
                 "malformed": "finalize_response",
             },
+        )
+        graph.add_conditional_edges(
+            "create_execution_plan",
+            lambda state: state["route"],
+            {"execute": "execute_tools", "finalize": "finalize_response"},
         )
         graph.add_conditional_edges(
             "execute_tools",
@@ -170,7 +193,22 @@ class AgentTurnGraph:
                 "dependency": "handle_dependency_failure",
             },
         )
-        graph.add_edge("record_tool_results", "check_iteration_limit")
+        graph.add_conditional_edges(
+            "record_tool_results",
+            lambda state: (
+                "synthesize" if state["execution_plan"].combine_results else "continue"
+            ),
+            {"synthesize": "synthesize_response", "continue": "check_iteration_limit"},
+        )
+        graph.add_conditional_edges(
+            "synthesize_response",
+            lambda state: state["route"],
+            {
+                "finalize": "finalize_response",
+                "dependency": "handle_dependency_failure",
+                "malformed": "finalize_response",
+            },
+        )
         graph.add_edge("check_iteration_limit", "call_model")
         graph.add_conditional_edges(
             "finalize_response",
@@ -259,6 +297,94 @@ class AgentTurnGraph:
             "failure_category": category,
         }
 
+    def create_execution_plan(self, state: AgentTurnState) -> dict[str, Any]:
+        """Validate model-selected calls and retain an inspectable ordered plan."""
+        self._entered("create_execution_plan", state)
+        calls = state["pending_tool_calls"]
+        if state["tool_call_count"] + len(calls) > self.max_tool_calls_per_turn:
+            logger.warning(
+                "event=agent_plan_rejected category=maximum_tool_calls step_count=%d",
+                len(calls),
+            )
+            return self._tool_failure(
+                state, "maximum_tool_calls", list(state["citations"]),
+                list(state["tool_sources"]), list(state["used_provenance"]),
+                self.MAX_TOOL_CALLS_MESSAGE,
+            )
+
+        steps: list[PlanStep] = []
+        planned_fingerprints: set[str] = set()
+        natural_count = 0
+        for call in calls:
+            if self.tool_registry.get(call.name) is None:
+                return self._tool_failure(
+                    state, "unknown_tool", list(state["citations"]),
+                    list(state["tool_sources"]), list(state["used_provenance"]),
+                )
+            try:
+                arguments = json.loads(call.arguments)
+                if not isinstance(arguments, dict):
+                    raise ValueError
+            except (json.JSONDecodeError, TypeError, ValueError):
+                return self._tool_failure(
+                    state, "invalid_plan", list(state["citations"]),
+                    list(state["tool_sources"]), list(state["used_provenance"]),
+                )
+            fingerprint = self._fingerprint(call.name, arguments)
+            is_natural = (
+                call.name == "sql_query"
+                and arguments.get("operation") == "natural_language_query"
+            )
+            natural_count += int(is_natural)
+            if (
+                fingerprint in planned_fingerprints
+                or fingerprint in state["executed_call_fingerprints"]
+                or natural_count > 1
+                or (is_natural and state["natural_language_sql_executed"])
+            ):
+                return self._tool_failure(
+                    state, "repeated_tool_call", list(state["citations"]),
+                    list(state["tool_sources"]), list(state["used_provenance"]),
+                    self.REPEATED_TOOL_CALL_MESSAGE,
+                )
+            planned_fingerprints.add(fingerprint)
+            steps.append(
+                PlanStep(
+                    call_id=call.call_id,
+                    tool_name=call.name,
+                    arguments=arguments,
+                    purpose=self._purpose_for(call.name),
+                )
+            )
+        plan = ExecutionPlan(
+            tools_needed=bool(steps),
+            steps=tuple(steps),
+            combine_results=len(steps) > 1,
+        )
+        logger.info(
+            "event=agent_plan_created step_count=%d tools=%s combine=%s",
+            len(steps),
+            ",".join(step.tool_name for step in steps),
+            plan.combine_results,
+        )
+        return {"execution_plan": plan, "route": "execute"}
+
+    @staticmethod
+    def _purpose_for(tool_name: str) -> str:
+        return {
+            "document_search": "Retrieve relevant indexed-document guidance.",
+            "organization_info": "Retrieve the requested organization-directory fact.",
+            "sql_query": "Retrieve the requested bounded structured database fact.",
+        }.get(tool_name, "Retrieve requested application evidence.")
+
+    @staticmethod
+    def _fingerprint(tool_name: str, arguments: dict[str, Any]) -> str:
+        normalized = {
+            key: " ".join(value.split()) if isinstance(value, str) else value
+            for key, value in arguments.items()
+        }
+        return f"{tool_name}:{json.dumps(normalized, sort_keys=True, separators=(',', ':'))}"
+
     def execute_tools(self, state: AgentTurnState) -> dict[str, Any]:
         self._entered("execute_tools", state)
         outputs: list[dict[str, Any]] = []
@@ -268,23 +394,17 @@ class AgentTurnGraph:
         fingerprints = list(state["executed_call_fingerprints"])
         natural_executed = state["natural_language_sql_executed"]
         safe_failure_category = state.get("failure_category", "")
-        for call in state["pending_tool_calls"]:
-            tool = self.tool_registry.get(call.name)
+        completed = list(state["completed_tool_results"])
+        evidence = {key: list(value) for key, value in state["evidence_by_source"].items()}
+        plan = state["execution_plan"]
+        for step_index, step in enumerate(plan.steps, start=1):
+            tool = self.tool_registry.get(step.tool_name)
             if tool is None:
                 return self._tool_failure(state, "unknown_tool", citations, sources, provenances)
-            try:
-                arguments = json.loads(call.arguments)
-                if not isinstance(arguments, dict):
-                    raise ValueError("Tool arguments must be a JSON object.")
-            except (json.JSONDecodeError, TypeError, ValueError):
-                return self._tool_failure(state, "invalid_arguments", citations, sources, provenances)
-            normalized = {
-                key: " ".join(value.split()) if isinstance(value, str) else value
-                for key, value in arguments.items()
-            }
-            fingerprint = f"{call.name}:{json.dumps(normalized, sort_keys=True, separators=(',', ':'))}"
+            arguments = step.arguments
+            fingerprint = self._fingerprint(step.tool_name, arguments)
             is_natural = (
-                call.name == "sql_query"
+                step.tool_name == "sql_query"
                 and arguments.get("operation") == "natural_language_query"
             )
             if fingerprint in fingerprints or (is_natural and natural_executed):
@@ -295,16 +415,18 @@ class AgentTurnGraph:
             except (TypeError, ValueError):
                 return self._tool_failure(state, "invalid_arguments", citations, sources, provenances)
             except Exception as error:
-                self._dependency_error = error
                 logger.exception(
                     "event=agent_graph_tool_failed tool_name=%s error_type=%s",
-                    call.name,
+                    step.tool_name,
                     type(error).__name__,
                 )
-                return {
-                    "failure_category": "tool_dependency_failure",
-                    "route": "dependency",
-                }
+                if not plan.combine_results:
+                    self._dependency_error = error
+                    return {
+                        "failure_category": "tool_dependency_failure",
+                        "route": "dependency",
+                    }
+                result = self._safe_failed_result(step.tool_name)
             fingerprints.append(fingerprint)
             natural_executed = natural_executed or is_natural
             if result.source not in sources:
@@ -314,17 +436,20 @@ class AgentTurnGraph:
             citations.extend(result.citations)
             if result.failure_category:
                 safe_failure_category = result.failure_category
+            record = EvidenceRecord(step=step, result=result)
+            completed.append(record)
+            evidence.setdefault(result.provenance.value, []).append(record)
             outputs.append(
                 {
                     "type": "function_call_output",
-                    "call_id": call.call_id,
+                    "call_id": step.call_id,
                     "output": json.dumps(result.to_model_output()),
                 }
             )
             logger.info(
                 "event=agent_graph_tool_completed tool_name=%s iteration=%d status=%s",
-                call.name,
-                state["iteration"] + 1,
+                step.tool_name,
+                step_index,
                 result.status.value,
             )
         return {
@@ -335,8 +460,29 @@ class AgentTurnGraph:
             "executed_call_fingerprints": fingerprints,
             "natural_language_sql_executed": natural_executed,
             "failure_category": safe_failure_category,
+            "completed_tool_results": completed,
+            "evidence_by_source": evidence,
+            "tool_call_count": state["tool_call_count"] + len(plan.steps),
             "route": "record",
         }
+
+    @staticmethod
+    def _safe_failed_result(tool_name: str) -> ToolExecutionResult:
+        provenance = {
+            "document_search": ToolProvenance.DOCUMENT,
+            "organization_info": ToolProvenance.STRUCTURED_ORGANIZATION_DATA,
+            "sql_query": ToolProvenance.STRUCTURED_SQL_DATA,
+        }[tool_name]
+        return ToolExecutionResult(
+            answer=f"The {tool_name} request could not be completed safely.",
+            status=ToolExecutionStatus.ERROR,
+            citations=(),
+            rag_llm_called=False,
+            source=tool_name,
+            provenance=provenance,
+            category="partial_dependency_failure",
+            failure_category="tool_dependency_failure",
+        )
 
     def _tool_failure(
         self,
@@ -368,6 +514,57 @@ class AgentTurnGraph:
         return {
             "turn_items": state["turn_items"] + state["tool_output_items"],
             "iteration": state["iteration"] + 1,
+        }
+
+    def synthesize_response(self, state: AgentTurnState) -> dict[str, Any]:
+        """Combine labeled multi-source evidence without exposing the internal plan."""
+        self._entered("synthesize_response", state)
+        synthesis_instructions = (
+            self.instructions
+            + " Synthesize the completed tool outputs into one concise answer. Answer "
+            "every requested part, keep database facts, organization-directory facts, "
+            "and indexed-document guidance clearly attributed to their own sources. "
+            "Treat insufficient_context, not_found, and error outputs as missing evidence; "
+            "state that limitation while preserving useful successful results. Do not "
+            "invent relationships, expose the execution plan, raw arguments, or SQL."
+        )
+        try:
+            response = self.model.respond(
+                instructions=synthesis_instructions,
+                context=AgentModelInput(
+                    items=tuple(state["history_items"] + state["turn_items"])
+                ),
+                tools=(),
+            )
+        except Exception as error:
+            self._dependency_error = error
+            logger.exception(
+                "event=agent_graph_synthesis_failed error_type=%s",
+                type(error).__name__,
+            )
+            return {"failure_category": "model_dependency_failure", "route": "dependency"}
+        if response.tool_calls or not response.output_text.strip():
+            return self._malformed("invalid_synthesis_response")
+        successful = any(
+            record.result.status
+            in {ToolExecutionStatus.ANSWERED, ToolExecutionStatus.INSUFFICIENT_CONTEXT,
+                ToolExecutionStatus.NOT_FOUND}
+            for record in state["completed_tool_results"]
+        )
+        logger.info(
+            "event=agent_graph_synthesis_completed evidence_source_count=%d partial=%s",
+            len(state["evidence_by_source"]),
+            any(
+                record.result.status is ToolExecutionStatus.ERROR
+                for record in state["completed_tool_results"]
+            ),
+        )
+        return {
+            "model_response": response,
+            "turn_items": state["turn_items"] + list(response.continuation_items),
+            "final_answer": response.output_text,
+            "should_commit": successful,
+            "route": "finalize",
         }
 
     def check_iteration_limit(self, state: AgentTurnState) -> dict[str, Any]:

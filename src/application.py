@@ -97,4 +97,5 @@ def build_agent_service(settings: Settings) -> AgentService:
             max_turns=settings.agent_memory_max_turns
         ),
         max_tool_iterations=settings.agent_max_tool_iterations,
+        max_tool_calls_per_turn=settings.agent_max_tool_calls_per_turn,
     )

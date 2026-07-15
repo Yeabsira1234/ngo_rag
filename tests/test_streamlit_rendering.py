@@ -59,8 +59,8 @@ def _render_agent_tool_message() -> None:
     render_message(ChatMessage(
         role="assistant",
         content="There are five open cases.",
-        agent_status="sql_answer",
-        tools_used=("sql_query",),
+        agent_status="document_answer",
+        tools_used=("sql_query", "document_search"),
     ))
 
 
@@ -113,7 +113,7 @@ def test_upload_failure_renders_safely_without_exception_details() -> None:
 def test_agent_status_and_safe_tool_label_render_compactly() -> None:
     app = AppTest.from_function(_render_agent_tool_message, default_timeout=10).run()
     assert [caption.value for caption in app.caption] == [
-        "Tools used: Structured database",
-        "Status: sql answer",
+        "Tools used: Structured database, Document search",
+        "Status: document answer",
     ]
     assert "SELECT" not in app.markdown[0].value

@@ -3,6 +3,7 @@ from unittest.mock import Mock
 
 from src.agent.memory import InMemoryConversationMemory
 from src.agent.models import (
+    AgentCitation,
     AgentModelResponse,
     AgentStatus,
     ToolCall,
@@ -81,6 +82,10 @@ def test_multiple_tool_calls_execute_and_return_outputs_in_order() -> None:
     outputs = [item for item in second_context if item.get("type") == "function_call_output"]
     assert [item["call_id"] for item in outputs] == ["call-1", "call-2"]
     assert len(memory.get_state().turns) == 1
+    assert model.respond.call_args_list[1].kwargs["tools"] == ()
+    assert "Synthesize the completed tool outputs" in (
+        model.respond.call_args_list[1].kwargs["instructions"]
+    )
 
 
 def test_malformed_empty_model_output_is_safe_and_not_committed() -> None:
@@ -165,3 +170,229 @@ def test_most_recent_service_events_use_one_bounded_predefined_query() -> None:
     assert response.status is AgentStatus.SQL_ANSWER
     assert response.tool_sources == ("sql_query",)
     assert "restriction" not in response.answer.lower()
+
+
+def _multi_model(*calls: ToolCall, answer: str = "Combined answer") -> Mock:
+    model = Mock()
+    model.respond.side_effect = [
+        AgentModelResponse(
+            output_text="",
+            tool_calls=tuple(calls),
+            continuation_items=tuple(
+                {"type": "function_call", "call_id": item.call_id}
+                for item in calls
+            ),
+        ),
+        AgentModelResponse(
+            output_text=answer,
+            tool_calls=(),
+            continuation_items=({"role": "assistant", "content": answer},),
+        ),
+    ]
+    return model
+
+
+def test_sql_then_document_plan_preserves_order_and_multiple_citations() -> None:
+    execution_order: list[str] = []
+    sql = tool("sql_query", ToolProvenance.STRUCTURED_SQL_DATA)
+    document = tool("document_search", ToolProvenance.DOCUMENT)
+    sql.execute.side_effect = lambda arguments: (
+        execution_order.append("sql_query") or sql.execute.return_value
+    )
+    citations = (
+        AgentCitation("policy-a.pdf", 1, 2, 0.2),
+        AgentCitation("policy-b.pdf", 4, 1, 0.3),
+    )
+    document_result = ToolExecutionResult(
+        answer="Housing assessments are required.",
+        status=ToolExecutionStatus.ANSWERED,
+        citations=citations,
+        rag_llm_called=True,
+        source="document_search",
+        provenance=ToolProvenance.DOCUMENT,
+        category="document_answer",
+    )
+    document.execute.side_effect = lambda arguments: (
+        execution_order.append("document_search") or document_result
+    )
+    model = _multi_model(
+        ToolCall("sql", "sql_query", '{"operation":"list_open_cases"}'),
+        ToolCall("doc", "document_search", '{"question":"housing assessments"}'),
+        answer="SQL reports open cases; the documents require assessments.",
+    )
+    memory = InMemoryConversationMemory()
+
+    response = AgentService(
+        model=model, tools=(sql, document), memory=memory
+    ).answer("Count open housing cases and summarize assessment guidance")
+
+    assert execution_order == ["sql_query", "document_search"]
+    assert response.tool_sources == ("sql_query", "document_search")
+    assert response.citations == citations
+    assert len(memory.get_state().turns) == 1
+    synthesis_items = model.respond.call_args_list[1].kwargs["context"].items
+    outputs = [item for item in synthesis_items if item.get("type") == "function_call_output"]
+    assert [item["call_id"] for item in outputs] == ["sql", "doc"]
+    assert '"provenance": "structured_sql_data"' in outputs[0]["output"]
+    assert '"provenance": "document"' in outputs[1]["output"]
+
+
+def test_organization_then_sql_plan_executes_in_declared_order() -> None:
+    order: list[str] = []
+    organization = tool(
+        "organization_info", ToolProvenance.STRUCTURED_ORGANIZATION_DATA
+    )
+    sql = tool("sql_query", ToolProvenance.STRUCTURED_SQL_DATA)
+    organization.execute.side_effect = lambda arguments: (
+        order.append("organization_info") or organization.execute.return_value
+    )
+    sql.execute.side_effect = lambda arguments: (
+        order.append("sql_query") or sql.execute.return_value
+    )
+    model = _multi_model(
+        ToolCall("org", "organization_info", '{"category":"location"}'),
+        ToolCall("sql", "sql_query", '{"operation":"list_offices"}'),
+    )
+    AgentService(model=model, tools=(organization, sql), memory=InMemoryConversationMemory()).answer(
+        "Compare the published location with database offices"
+    )
+    assert order == ["organization_info", "sql_query"]
+
+
+def test_partial_tool_dependency_failure_keeps_successful_evidence() -> None:
+    sql = tool("sql_query", ToolProvenance.STRUCTURED_SQL_DATA)
+    document = tool("document_search", ToolProvenance.DOCUMENT)
+    document.execute.side_effect = RuntimeError("vector service unavailable")
+    model = _multi_model(
+        ToolCall("sql", "sql_query", '{"operation":"list_open_cases"}'),
+        ToolCall("doc", "document_search", '{"question":"housing policy"}'),
+        answer="The database result is available, but document guidance was unavailable.",
+    )
+    memory = InMemoryConversationMemory()
+    response = AgentService(
+        model=model, tools=(sql, document), memory=memory
+    ).answer("Give the database count and document policy")
+    assert response.status is AgentStatus.DOCUMENT_ANSWER
+    assert "database result is available" in response.answer
+    outputs = [
+        item for item in model.respond.call_args_list[1].kwargs["context"].items
+        if item.get("type") == "function_call_output"
+    ]
+    assert '"status": "answered"' in outputs[0]["output"]
+    assert '"status": "error"' in outputs[1]["output"]
+    assert len(memory.get_state().turns) == 1
+
+
+def test_weak_document_evidence_is_labeled_insufficient_not_strong() -> None:
+    sql = tool("sql_query", ToolProvenance.STRUCTURED_SQL_DATA)
+    document = tool("document_search", ToolProvenance.DOCUMENT)
+    document.execute.return_value = ToolExecutionResult(
+        answer="Not enough relevant document information was found.",
+        status=ToolExecutionStatus.INSUFFICIENT_CONTEXT,
+        citations=(),
+        rag_llm_called=False,
+        source="document_search",
+        provenance=ToolProvenance.DOCUMENT,
+        category="insufficient_context",
+    )
+    model = _multi_model(
+        ToolCall("sql", "sql_query", '{"operation":"recent_service_events"}'),
+        ToolCall("doc", "document_search", '{"question":"service policy"}'),
+        answer="Recent events were found; indexed documents lacked relevant guidance.",
+    )
+    response = AgentService(
+        model=model, tools=(sql, document), memory=InMemoryConversationMemory()
+    ).answer("Show recent events and related guidance")
+    assert response.citations == ()
+    assert "lacked relevant guidance" in response.answer
+
+
+def test_duplicate_calls_inside_plan_are_rejected_before_execution() -> None:
+    document = tool("document_search", ToolProvenance.DOCUMENT)
+    duplicate = ToolCall("one", "document_search", '{"question":"same policy"}')
+    model = _multi_model(
+        duplicate,
+        ToolCall("two", "document_search", '{"question":"  same   policy  "}'),
+    )
+    memory = InMemoryConversationMemory()
+    response = AgentService(
+        model=model, tools=(document,), memory=memory
+    ).answer("Search twice")
+    assert response.status is AgentStatus.TOOL_ERROR
+    assert response.answer == AgentService.REPEATED_TOOL_CALL_MESSAGE
+    document.execute.assert_not_called()
+    assert memory.get_state().turns == ()
+
+
+def test_oversized_plan_is_rejected_before_any_tool_executes() -> None:
+    first = tool("document_search", ToolProvenance.DOCUMENT)
+    second = tool("organization_info", ToolProvenance.STRUCTURED_ORGANIZATION_DATA)
+    model = _multi_model(
+        ToolCall("one", "document_search", '{"question":"policy"}'),
+        ToolCall("two", "organization_info", '{"category":"location"}'),
+    )
+    memory = InMemoryConversationMemory()
+    response = AgentService(
+        model=model,
+        tools=(first, second),
+        memory=memory,
+        max_tool_calls_per_turn=1,
+    ).answer("Use both")
+    assert response.status is AgentStatus.TOOL_ERROR
+    first.execute.assert_not_called()
+    second.execute.assert_not_called()
+    assert model.respond.call_count == 1
+    assert memory.get_state().turns == ()
+
+
+def test_unknown_tool_in_plan_is_rejected_without_committing_memory() -> None:
+    known = tool("document_search", ToolProvenance.DOCUMENT)
+    model = _multi_model(ToolCall("bad", "external_api", '{}'))
+    memory = InMemoryConversationMemory()
+    response = AgentService(model=model, tools=(known,), memory=memory).answer("Use unknown")
+    assert response.status is AgentStatus.TOOL_ERROR
+    known.execute.assert_not_called()
+    assert memory.get_state().turns == ()
+
+
+def test_follow_up_receives_prior_combined_turn_context() -> None:
+    document = tool("document_search", ToolProvenance.DOCUMENT)
+    sql = tool("sql_query", ToolProvenance.STRUCTURED_SQL_DATA)
+    model = _multi_model(
+        ToolCall("sql", "sql_query", '{"operation":"list_open_cases"}'),
+        ToolCall("doc", "document_search", '{"question":"case policy"}'),
+        answer="Combined first answer",
+    )
+    model.respond.side_effect = list(model.respond.side_effect) + [
+        AgentModelResponse(
+            output_text="Follow-up answer",
+            tool_calls=(),
+            continuation_items=({"role": "assistant", "content": "Follow-up answer"},),
+        )
+    ]
+    service = AgentService(
+        model=model, tools=(sql, document), memory=InMemoryConversationMemory()
+    )
+    service.answer("Combine database and policy")
+    service.answer("What does that mean?")
+    follow_up_items = model.respond.call_args_list[2].kwargs["context"].items
+    assert any(item.get("content") == "Combined first answer" for item in follow_up_items)
+    assert follow_up_items[-1]["content"] == "What does that mean?"
+
+
+def test_fully_failed_multi_tool_turn_does_not_commit_memory() -> None:
+    document = tool("document_search", ToolProvenance.DOCUMENT)
+    sql = tool("sql_query", ToolProvenance.STRUCTURED_SQL_DATA)
+    document.execute.side_effect = RuntimeError("document unavailable")
+    sql.execute.side_effect = RuntimeError("database unavailable")
+    model = _multi_model(
+        ToolCall("sql", "sql_query", '{"operation":"list_open_cases"}'),
+        ToolCall("doc", "document_search", '{"question":"case policy"}'),
+        answer="Neither requested source was available.",
+    )
+    memory = InMemoryConversationMemory()
+    response = AgentService(
+        model=model, tools=(sql, document), memory=memory
+    ).answer("Use both unavailable sources")
+    assert "Neither requested source" in response.answer
+    assert memory.get_state().turns == ()

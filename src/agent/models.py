@@ -33,6 +33,33 @@ class ToolCall:
 
 
 @dataclass(frozen=True, slots=True)
+class PlanStep:
+    """One validated, ordered application-tool step."""
+
+    call_id: str
+    tool_name: str
+    arguments: dict[str, Any]
+    purpose: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionPlan:
+    """Internal bounded plan derived from model-selected tools."""
+
+    tools_needed: bool
+    steps: tuple[PlanStep, ...]
+    combine_results: bool
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceRecord:
+    """Typed tool evidence retained until final synthesis."""
+
+    step: PlanStep
+    result: "ToolExecutionResult"
+
+
+@dataclass(frozen=True, slots=True)
 class AgentModelResponse:
     """Normalized model output consumed by the agent loop."""
 

@@ -30,6 +30,7 @@ class Settings:
     retrieval_result_count: int = 4
     retrieval_max_distance: float = 0.9
     agent_max_tool_iterations: int = 2
+    agent_max_tool_calls_per_turn: int = 3
     agent_memory_max_turns: int = 10
     sql_server: str = "YEABSIRA"
     sql_database: str = "NGO_RAG"
@@ -77,6 +78,10 @@ class Settings:
         if self.agent_max_tool_iterations <= 0:
             raise ConfigurationError(
                 "AGENT_MAX_TOOL_ITERATIONS must be greater than zero."
+            )
+        if self.agent_max_tool_calls_per_turn <= 0:
+            raise ConfigurationError(
+                "AGENT_MAX_TOOL_CALLS_PER_TURN must be greater than zero."
             )
         if self.agent_memory_max_turns <= 0:
             raise ConfigurationError(
@@ -146,6 +151,9 @@ class Settings:
             ),
             agent_max_tool_iterations=_read_int(
                 env, "AGENT_MAX_TOOL_ITERATIONS", 2
+            ),
+            agent_max_tool_calls_per_turn=_read_int(
+                env, "AGENT_MAX_TOOL_CALLS_PER_TURN", 3
             ),
             agent_memory_max_turns=_read_int(
                 env, "AGENT_MEMORY_MAX_TURNS", 10

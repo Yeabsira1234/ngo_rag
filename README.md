@@ -23,7 +23,7 @@ or a direct answer.
 - Safe CLI error handling and structured file logging
 - Streamlit agent chat with isolated in-session conversation memory
 - Versioned FastAPI question-answering endpoint and health check
-- Multi-tool OpenAI agent with bounded tool-call iterations
+- Planned cross-tool OpenAI agent with bounded calls and partial completion
 - Safe fictional structured organization-information tool
 - API-key redaction in application logs
 - Unit tests that do not require OpenAI or a real Chroma database
@@ -54,7 +54,8 @@ Agent question
   -> AgentService
       -> AgentTurnGraph (temporary typed turn state)
           -> validate_input -> call_model -> route_model_output
-          -> execute_tools -> record_tool_results -> check_iteration_limit
+          -> create_execution_plan -> execute_tools -> record_tool_results
+          -> synthesize_response or check_iteration_limit
           -> finalize_response -> commit_memory
       -> InMemoryConversationMemory (complete committed session turns)
       -> OpenAIAgentModel (select a tool or answer directly)
@@ -89,13 +90,17 @@ flowchart TD
     V -->|invalid| F[finalize_response]
     M --> R[route_model_output]
     R -->|final answer| F
-    R -->|tool calls| T[execute_tools]
+    R -->|tool calls| P[create_execution_plan]
     R -->|limit| L[finalize_limit_reached]
     R -->|dependency failure| E[handle_dependency_failure]
-    T -->|success| O[record_tool_results]
+    P -->|valid bounded plan| T[execute_tools in plan order]
+    P -->|invalid, duplicate, unknown, or oversized| F
+    T -->|completed or partial success| O[record_tool_results]
     T -->|safe rejection| F
     T -->|dependency failure| E
-    O --> I[check_iteration_limit]
+    O -->|multi-tool| Y[synthesize_response]
+    O -->|single-tool| I[check_iteration_limit]
+    Y --> F
     I --> M
     F -->|successful completion| C[commit_memory]
     F -->|non-committing outcome| X([END])
@@ -103,9 +108,9 @@ flowchart TD
     L --> X
 ```
 
-Temporary `AgentTurnState` contains only one question's retained model items,
-pending calls, ordered tool results, citations, provenance, iteration count,
-status, and failure category. Infrastructure dependencies remain injected into
+Temporary `AgentTurnState` contains only one question's typed execution plan,
+current ordered results, evidence grouped by provenance, citations, call and
+iteration counts, synthesis status, and failure category. Infrastructure dependencies remain injected into
 node callables and are not stored in graph state. Existing
 `InMemoryConversationMemory` remains session-scoped and separate; LangGraph
 checkpointers are not enabled. Only a successfully finalized response reaches
@@ -117,6 +122,30 @@ repeated calls, permits at most one natural-language SQL operation per turn,
 and retains the configured maximum tool-iteration boundary. Persistent
 checkpointers and human approval nodes are deferred to later persistence and
 LLMOps work.
+
+For genuinely cross-source questions, the first model selection is converted
+to an internal `ExecutionPlan` containing ordered `PlanStep` values with a tool,
+typed arguments, and a short safe purpose. The complete plan is validated before
+execution. `AGENT_MAX_TOOL_CALLS_PER_TURN` defaults to 3 and is independent of
+`AGENT_MAX_TOOL_ITERATIONS`; unknown, duplicate, or oversized plans stop safely.
+Plans, arguments, generated SQL, and model reasoning are never shown to users.
+
+Tool results remain typed and separated as document, SQL, or organization
+evidence through a dedicated synthesis node. Document citations retain filename,
+relative document identity, page, chunk, and distance. Synthesis is instructed
+to distinguish database facts from document guidance and organization-directory
+facts. Weak document retrieval is labeled as insufficient rather than treated as
+evidence. If one source fails, successful independent evidence is still returned
+with a clear limitation; a turn where every source fails is not committed to
+conversation memory. A successful combined turn is committed exactly once with
+the ordered Responses API items, so follow-up questions can use the combined
+context.
+
+Supported combinations are document plus SQL, organization information plus
+SQL, and document plus organization information, up to the configured call cap.
+Planning is single-agent and bounded: it does not retry failed tools, run calls
+in parallel, access external APIs, infer unsupported relationships, or bypass
+the existing RAG relevance and SQL validation boundaries.
 
 ## Repository structure
 
@@ -318,6 +347,11 @@ configured OpenAI model to choose among:
 - `organization_info` for one structured fact from a small fictional sample
   directory. Results identify `organization_info` as their source and do not
   have document citations.
+- `sql_query` for predefined read-only database operations or validated,
+  bounded natural-language SQL when an exact predefined operation does not fit.
+- Multiple tools, only when separate requested parts genuinely require separate
+  sources; results are synthesized with source attribution and partial-failure
+  handling.
 - A direct answer when neither tool is required.
 
 Example agent questions:
@@ -350,6 +384,9 @@ Unknown tools and malformed arguments are rejected, and
 `AGENT_MAX_TOOL_ITERATIONS` prevents an infinite tool loop. The direct RAG CLI
 and FastAPI API remain stateless. Memory is enabled for `agent_chat.py` and
 independently for each Streamlit browser session.
+`AGENT_MAX_TOOL_CALLS_PER_TURN` separately caps total tool executions in one
+turn (default 3). Streamlit and the agent CLI display tools in execution order;
+Streamlit continues to render document citations beneath combined answers.
 
 ## Running the Streamlit app
 

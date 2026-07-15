@@ -114,4 +114,5 @@ def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> Non
         tools=(document_tool, organization_tool, sql_tool),
         memory=memory,
         max_tool_iterations=settings.agent_max_tool_iterations,
+        max_tool_calls_per_turn=settings.agent_max_tool_calls_per_turn,
     )

@@ -22,6 +22,7 @@ def test_settings_use_current_application_defaults() -> None:
     assert settings.retrieval_result_count == 4
     assert settings.retrieval_max_distance == 0.9
     assert settings.agent_max_tool_iterations == 2
+    assert settings.agent_max_tool_calls_per_turn == 3
     assert settings.agent_memory_max_turns == 10
     assert settings.sql_server == "YEABSIRA"
     assert settings.sql_database == "NGO_RAG"
@@ -45,6 +46,7 @@ def test_settings_read_environment_overrides() -> None:
             "RETRIEVAL_RESULT_COUNT": "6",
             "RETRIEVAL_MAX_DISTANCE": "0.75",
             "AGENT_MAX_TOOL_ITERATIONS": "3",
+            "AGENT_MAX_TOOL_CALLS_PER_TURN": "2",
             "AGENT_MEMORY_MAX_TURNS": "7",
             "LOG_LEVEL": "debug",
         }
@@ -62,6 +64,7 @@ def test_settings_read_environment_overrides() -> None:
     assert settings.retrieval_result_count == 6
     assert settings.retrieval_max_distance == 0.75
     assert settings.agent_max_tool_iterations == 3
+    assert settings.agent_max_tool_calls_per_turn == 2
     assert settings.agent_memory_max_turns == 7
     assert settings.log_level == "DEBUG"
 
@@ -134,5 +137,15 @@ def test_settings_reject_invalid_agent_memory_limit() -> None:
             {
                 "OPENAI_API_KEY": "test-key",
                 "AGENT_MEMORY_MAX_TURNS": "0",
+            }
+        )
+
+
+def test_settings_reject_invalid_agent_tool_call_limit() -> None:
+    with pytest.raises(ConfigurationError, match="AGENT_MAX_TOOL_CALLS_PER_TURN"):
+        Settings.from_env(
+            {
+                "OPENAI_API_KEY": "test-key",
+                "AGENT_MAX_TOOL_CALLS_PER_TURN": "0",
             }
         )
