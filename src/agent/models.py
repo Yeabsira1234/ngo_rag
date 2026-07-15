@@ -38,7 +38,14 @@ class AgentModelResponse:
 
     output_text: str
     tool_calls: tuple[ToolCall, ...]
-    continuation_items: tuple[Any, ...]
+    continuation_items: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AgentModelInput:
+    """Ordered conversation items sent through the model boundary."""
+
+    items: tuple[dict[str, Any], ...]
 
 
 @dataclass(frozen=True, slots=True)

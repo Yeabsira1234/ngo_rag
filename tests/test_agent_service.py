@@ -2,6 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from src.agent.memory import InMemoryConversationMemory
 from src.agent.models import (
     AgentCitation,
     AgentModelResponse,
@@ -50,11 +51,15 @@ def _tool() -> Mock:
     return tool
 
 
+def _memory(max_turns: int = 10) -> InMemoryConversationMemory:
+    return InMemoryConversationMemory(max_turns=max_turns)
+
+
 def test_agent_can_answer_directly_without_calling_tool() -> None:
     model = Mock()
     model.respond.return_value = _model_response(text="Hello! How can I help?")
     tool = _tool()
-    service = AgentService(model=model, tools=(tool,))
+    service = AgentService(model=model, tools=(tool,), memory=_memory())
 
     response = service.answer("Say hello")
 
@@ -63,6 +68,46 @@ def test_agent_can_answer_directly_without_calling_tool() -> None:
     assert response.document_tool_used is False
     assert response.citations == ()
     tool.execute.assert_not_called()
+
+
+def test_previous_turns_are_passed_with_follow_up_question() -> None:
+    model = Mock()
+    model.respond.side_effect = [
+        _model_response(text="The office is open from 9 to 5."),
+        _model_response(text="Friday uses those same hours."),
+    ]
+    memory = _memory()
+    service = AgentService(model=model, tools=(_tool(),), memory=memory)
+
+    service.answer("What are the support office hours?")
+    service.answer("What about on Friday?")
+
+    second_context = model.respond.call_args_list[1].kwargs["context"]
+    assert second_context.items == (
+        {
+            "role": "user",
+            "content": "What are the support office hours?",
+        },
+        {
+            "role": "assistant",
+            "content": "The office is open from 9 to 5.",
+        },
+        {"role": "user", "content": "What about on Friday?"},
+    )
+
+
+def test_direct_answer_turn_is_stored() -> None:
+    model = Mock()
+    model.respond.return_value = _model_response(text="Hello!")
+    memory = _memory()
+    service = AgentService(model=model, tools=(_tool(),), memory=memory)
+
+    service.answer("Say hello")
+
+    turn = memory.get_state().turns[0]
+    assert turn.user_message.content == "Say hello"
+    assert turn.assistant_message.content == "Hello!"
+    assert turn.status is AgentStatus.DIRECT_ANSWER
 
 
 def test_document_tool_path_preserves_citations_and_returns_output_to_model() -> None:
@@ -90,7 +135,8 @@ def test_document_tool_path_preserves_citations_and_returns_output_to_model() ->
         citations=(citation,),
         rag_llm_called=True,
     )
-    service = AgentService(model=model, tools=(tool,))
+    memory = _memory()
+    service = AgentService(model=model, tools=(tool,), memory=memory)
 
     response = service.answer("What are the office hours?")
 
@@ -100,10 +146,18 @@ def test_document_tool_path_preserves_citations_and_returns_output_to_model() ->
     tool.execute.assert_called_once_with(
         {"question": "What are the office hours?"}
     )
-    second_input = model.respond.call_args_list[1].kwargs["input_items"]
-    assert second_input[-1]["type"] == "function_call_output"
-    assert second_input[-1]["call_id"] == "call-1"
-    assert '"llm_called": true' in second_input[-1]["output"]
+    second_context = model.respond.call_args_list[1].kwargs["context"]
+    assert second_context.items[-1]["type"] == "function_call_output"
+    assert second_context.items[-1]["call_id"] == "call-1"
+    assert '"llm_called": true' in second_context.items[-1]["output"]
+    stored_turn = memory.get_state().turns[0]
+    assert stored_turn.citations == (citation,)
+    assert [item.get("type") for item in stored_turn.model_items] == [
+        None,
+        "function_call",
+        "function_call_output",
+        None,
+    ]
 
 
 def test_malformed_tool_arguments_are_rejected_safely() -> None:
@@ -116,7 +170,7 @@ def test_malformed_tool_arguments_are_rejected_safely() -> None:
         )
     )
     tool = _tool()
-    service = AgentService(model=model, tools=(tool,))
+    service = AgentService(model=model, tools=(tool,), memory=_memory())
 
     response = service.answer("A question")
 
@@ -135,7 +189,7 @@ def test_unknown_tool_name_is_rejected_safely() -> None:
         )
     )
     tool = _tool()
-    service = AgentService(model=model, tools=(tool,))
+    service = AgentService(model=model, tools=(tool,), memory=_memory())
 
     response = service.answer("A question")
 
@@ -154,7 +208,7 @@ def test_tool_dependency_failure_is_not_silently_swallowed() -> None:
     )
     tool = _tool()
     tool.execute.side_effect = RuntimeError("private dependency detail")
-    service = AgentService(model=model, tools=(tool,))
+    service = AgentService(model=model, tools=(tool,), memory=_memory())
 
     with pytest.raises(AgentDependencyError) as raised:
         service.answer("A question")
@@ -166,10 +220,28 @@ def test_tool_dependency_failure_is_not_silently_swallowed() -> None:
 def test_model_dependency_failure_is_not_silently_swallowed() -> None:
     model = Mock()
     model.respond.side_effect = RuntimeError("provider unavailable")
-    service = AgentService(model=model, tools=(_tool(),))
+    service = AgentService(model=model, tools=(_tool(),), memory=_memory())
 
     with pytest.raises(AgentDependencyError):
         service.answer("A question")
+
+
+def test_failed_turn_does_not_change_previous_memory() -> None:
+    model = Mock()
+    model.respond.side_effect = [
+        _model_response(text="A valid answer"),
+        RuntimeError("provider unavailable"),
+    ]
+    memory = _memory()
+    service = AgentService(model=model, tools=(_tool(),), memory=memory)
+    service.answer("First question")
+
+    with pytest.raises(AgentDependencyError):
+        service.answer("Failed follow-up")
+
+    state = memory.get_state()
+    assert len(state.turns) == 1
+    assert state.turns[0].user_message.content == "First question"
 
 
 def test_maximum_tool_iterations_prevents_infinite_loop() -> None:
@@ -196,7 +268,12 @@ def test_maximum_tool_iterations_prevents_infinite_loop() -> None:
         citations=(),
         rag_llm_called=True,
     )
-    service = AgentService(model=model, tools=(tool,), max_tool_iterations=1)
+    service = AgentService(
+        model=model,
+        tools=(tool,),
+        memory=_memory(),
+        max_tool_iterations=1,
+    )
 
     response = service.answer("A question")
 
@@ -210,7 +287,7 @@ def test_maximum_tool_iterations_prevents_infinite_loop() -> None:
 def test_empty_question_does_not_call_model_or_tools(question: str) -> None:
     model = Mock()
     tool = _tool()
-    service = AgentService(model=model, tools=(tool,))
+    service = AgentService(model=model, tools=(tool,), memory=_memory())
 
     response = service.answer(question)
 

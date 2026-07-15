@@ -1,6 +1,7 @@
 from openai import OpenAI
 
 from src.agent.openai_model import OpenAIAgentModel
+from src.agent.memory import InMemoryConversationMemory
 from src.agent.service import AgentService
 from src.agent.tools import DocumentSearchTool
 from src.config import Settings
@@ -46,5 +47,8 @@ def build_agent_service(settings: Settings) -> AgentService:
     return AgentService(
         model=model,
         tools=(DocumentSearchTool(rag_service),),
+        memory=InMemoryConversationMemory(
+            max_turns=settings.agent_memory_max_turns
+        ),
         max_tool_iterations=settings.agent_max_tool_iterations,
     )

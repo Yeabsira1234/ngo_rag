@@ -57,6 +57,7 @@ def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> Non
     openai_instance = Mock(responses=responses_client)
     model = object()
     document_tool = object()
+    memory = object()
     agent_service = object()
 
     monkeypatch.setattr(application, "build_rag_service", Mock(return_value=rag_service))
@@ -64,10 +65,12 @@ def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> Non
     model_class = Mock(return_value=model)
     tool_class = Mock(return_value=document_tool)
     agent_class = Mock(return_value=agent_service)
+    memory_class = Mock(return_value=memory)
     monkeypatch.setattr(application, "OpenAI", openai_class)
     monkeypatch.setattr(application, "OpenAIAgentModel", model_class)
     monkeypatch.setattr(application, "DocumentSearchTool", tool_class)
     monkeypatch.setattr(application, "AgentService", agent_class)
+    monkeypatch.setattr(application, "InMemoryConversationMemory", memory_class)
 
     result = application.build_agent_service(settings)
 
@@ -78,8 +81,12 @@ def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> Non
         model=settings.llm_model,
     )
     tool_class.assert_called_once_with(rag_service)
+    memory_class.assert_called_once_with(
+        max_turns=settings.agent_memory_max_turns
+    )
     agent_class.assert_called_once_with(
         model=model,
         tools=(document_tool,),
+        memory=memory,
         max_tool_iterations=settings.agent_max_tool_iterations,
     )

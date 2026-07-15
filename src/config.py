@@ -26,6 +26,7 @@ class Settings:
     retrieval_result_count: int = 4
     retrieval_max_distance: float = 0.9
     agent_max_tool_iterations: int = 2
+    agent_memory_max_turns: int = 10
     log_level: str = "INFO"
 
     def __post_init__(self) -> None:
@@ -59,6 +60,10 @@ class Settings:
         if self.agent_max_tool_iterations <= 0:
             raise ConfigurationError(
                 "AGENT_MAX_TOOL_ITERATIONS must be greater than zero."
+            )
+        if self.agent_memory_max_turns <= 0:
+            raise ConfigurationError(
+                "AGENT_MEMORY_MAX_TURNS must be greater than zero."
             )
         if self.log_level not in {
             "DEBUG",
@@ -112,6 +117,9 @@ class Settings:
             ),
             agent_max_tool_iterations=_read_int(
                 env, "AGENT_MAX_TOOL_ITERATIONS", 2
+            ),
+            agent_memory_max_turns=_read_int(
+                env, "AGENT_MEMORY_MAX_TURNS", 10
             ),
             log_level=env.get("LOG_LEVEL", "INFO").strip().upper(),
         )

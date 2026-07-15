@@ -39,7 +39,8 @@ def run() -> int:
 
     logger.info("event=agent_cli_startup_completed")
     print("Document agent is ready.")
-    print("Type 'exit' to stop.\n")
+    print("Conversation memory lasts only until this process exits.")
+    print("Type '/clear' to clear memory or 'exit' to stop.\n")
 
     while True:
         try:
@@ -51,6 +52,11 @@ def run() -> int:
         if question.lower() in {"exit", "quit"}:
             print("Goodbye.")
             return 0
+
+        if question.lower() == "/clear":
+            agent.clear_memory()
+            print("Conversation history cleared.\n")
+            continue
 
         if not question:
             print(f"{AgentService.INVALID_QUESTION_MESSAGE}\n")

@@ -49,6 +49,7 @@ Question
 Agent question
   -> agent_chat.py
   -> AgentService
+      -> InMemoryConversationMemory (complete session turns)
       -> OpenAIAgentModel (select a tool or answer directly)
       -> DocumentSearchTool
           -> existing RAGService
@@ -62,7 +63,7 @@ relevance-filtering, or prompt-building logic.
 `AgentService` does not replace `RAGService`. It owns only model-directed tool
 selection, safe tool dispatch, and the bounded tool-call loop. The direct CLI,
 Streamlit interface, and FastAPI endpoint continue to call `RAGService`
-without agent behavior.
+without agent behavior or conversation memory.
 
 ## Repository structure
 
@@ -87,6 +88,7 @@ without agent behavior.
 |   |-- config.py                   # Typed environment settings
 |   |-- application.py              # Shared dependency factory
 |   |-- agent/                       # Agent models, tools, and orchestration
+|   |   `-- memory.py                # Typed process-local conversation memory
 |   |-- api_models.py               # Typed HTTP request/response schemas
 |   |-- chat_history.py             # Visible UI-session message models
 |   |-- documents.py                # Page and chunk document models
@@ -168,6 +170,7 @@ The available settings are:
 | `RETRIEVAL_RESULT_COUNT` | Maximum candidates requested | `4` |
 | `RETRIEVAL_MAX_DISTANCE` | Maximum accepted L2 distance | `0.9` |
 | `AGENT_MAX_TOOL_ITERATIONS` | Maximum agent tool-call rounds | `2` |
+| `AGENT_MEMORY_MAX_TURNS` | Complete agent turns retained in memory | `10` |
 
 `.env` is ignored by Git. Never commit API keys or other credentials.
 
@@ -236,9 +239,22 @@ by the existing `RAGService`. For general questions that do not require the
 indexed document, it can answer directly. Citations from document searches are
 preserved in the final agent response.
 
-The agent currently has one read-only tool and no conversation memory. Each
-question is independent. Unknown tools and malformed arguments are rejected,
-and `AGENT_MAX_TOOL_ITERATIONS` prevents an infinite tool loop.
+The agent currently has one read-only tool and process-local conversation
+memory. Follow-up questions receive retained user/assistant turns and any
+ordered tool-call context required by the Responses API. Enter `/clear` to
+remove the current session history without exiting.
+
+Memory retains at most `AGENT_MEMORY_MAX_TURNS` complete exchanges. When the
+limit is exceeded, the oldest whole turn is removed, including its tool call
+and matching result. History is never written to disk and disappears when the
+agent process exits. Each new `agent_chat.py` process receives an independent
+memory store. A future deployment can replace the small memory-store interface
+with Redis or a database without moving state into `RAGService`.
+
+Unknown tools and malformed arguments are rejected, and
+`AGENT_MAX_TOOL_ITERATIONS` prevents an infinite tool loop. The direct RAG CLI,
+Streamlit UI, and FastAPI API remain stateless; memory is enabled only for
+`agent_chat.py` in this step.
 
 ## Running the Streamlit app
 
@@ -381,7 +397,8 @@ requests or require the project's persistent Chroma database.
 - The relevance threshold has not been evaluated on a labeled benchmark.
 - Re-ingestion does not yet remove stale records when chunk identifiers change.
 - Visible Streamlit history is not conversational memory.
-- The agent has one document-search tool and no conversational memory.
+- The agent has one document-search tool and only in-process memory.
+- Agent memory is not shared across processes and is not durable.
 - Agent tool selection does not yet have a labeled evaluation benchmark.
 - There is no authentication or user authorization.
 - OpenAI and local Chroma failures are logged but are not retried.
@@ -392,7 +409,7 @@ requests or require the project's persistent Chroma database.
 Planned work will be introduced incrementally:
 
 1. RAG evaluation datasets, retrieval metrics, and answer-quality evaluation
-2. Agent conversation memory and additional approved tools
+2. Additional approved agent tools
 3. Docker packaging
 4. Monitoring, tracing, and operational dashboards
 5. CI/CD and security controls

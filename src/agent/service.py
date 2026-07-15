@@ -1,9 +1,16 @@
 import json
 import logging
-from typing import Any, Protocol
+from typing import Protocol
 
+from src.agent.memory import (
+    ConversationMemory,
+    ConversationMessage,
+    ConversationRole,
+    ConversationTurn,
+)
 from src.agent.models import (
     AgentCitation,
+    AgentModelInput,
     AgentModelResponse,
     AgentResponse,
     AgentStatus,
@@ -28,7 +35,7 @@ class AgentModel(Protocol):
         self,
         *,
         instructions: str,
-        input_items: str | list[Any],
+        context: AgentModelInput,
         tools: tuple[ToolDefinition, ...],
     ) -> AgentModelResponse: ...
 
@@ -53,6 +60,7 @@ class AgentService:
         self,
         model: AgentModel,
         tools: tuple[AgentTool, ...],
+        memory: ConversationMemory,
         max_tool_iterations: int = 2,
     ) -> None:
         if max_tool_iterations <= 0:
@@ -62,6 +70,7 @@ class AgentService:
             raise ValueError("Agent tool names must be unique.")
 
         self.model = model
+        self.memory = memory
         self.tools = tool_map
         self.tool_definitions = tuple(tool.definition for tool in tools)
         self.max_tool_iterations = max_tool_iterations
@@ -77,18 +86,29 @@ class AgentService:
                 document_tool_used=False,
             )
 
-        input_items: str | list[Any] = [
-            {"role": "user", "content": normalized_question}
-        ]
+        state = self.memory.get_state()
+        user_message = ConversationMessage(
+            role=ConversationRole.USER,
+            content=normalized_question,
+        )
+        history_items = list(state.to_model_items())
+        turn_items = [user_message.to_model_item()]
         citations: list[AgentCitation] = []
         document_tool_used = False
+        logger.info(
+            "event=agent_turn_started retained_turns=%d retained_messages=%d",
+            len(state.turns),
+            state.message_count,
+        )
 
         for iteration in range(self.max_tool_iterations + 1):
             logger.info("event=agent_model_invocation iteration=%d", iteration)
             try:
                 model_response = self.model.respond(
                     instructions=self.INSTRUCTIONS,
-                    input_items=input_items,
+                    context=AgentModelInput(
+                        items=tuple(history_items + turn_items)
+                    ),
                     tools=self.tool_definitions,
                 )
             except Exception as error:
@@ -105,12 +125,39 @@ class AgentService:
                     if document_tool_used
                     else AgentStatus.DIRECT_ANSWER
                 )
-                return AgentResponse(
+                response = AgentResponse(
                     answer=model_response.output_text,
                     status=status,
                     citations=tuple(citations),
                     document_tool_used=document_tool_used,
                 )
+                turn_items.extend(model_response.continuation_items)
+                if not model_response.continuation_items:
+                    turn_items.append(
+                        {
+                            "role": "assistant",
+                            "content": response.answer,
+                        }
+                    )
+                self.memory.append_turn(
+                    ConversationTurn(
+                        user_message=user_message,
+                        assistant_message=ConversationMessage(
+                            role=ConversationRole.ASSISTANT,
+                            content=response.answer,
+                        ),
+                        model_items=tuple(turn_items),
+                        status=response.status,
+                        citations=response.citations,
+                    )
+                )
+                logger.info(
+                    "event=agent_turn_stored model_item_count=%d "
+                    "citation_count=%d",
+                    len(turn_items),
+                    len(response.citations),
+                )
+                return response
 
             if iteration >= self.max_tool_iterations:
                 logger.warning(
@@ -124,8 +171,7 @@ class AgentService:
                     document_tool_used=document_tool_used,
                 )
 
-            next_input = list(input_items)
-            next_input.extend(model_response.continuation_items)
+            turn_items.extend(model_response.continuation_items)
             for tool_call in model_response.tool_calls:
                 logger.info(
                     "event=agent_tool_selected tool_name=%s iteration=%d",
@@ -178,7 +224,7 @@ class AgentService:
                     tool_call.name,
                     len(result.citations),
                 )
-                next_input.append(
+                turn_items.append(
                     {
                         "type": "function_call_output",
                         "call_id": tool_call.call_id,
@@ -186,9 +232,16 @@ class AgentService:
                     }
                 )
 
-            input_items = next_input
-
         raise AssertionError("Agent loop exited unexpectedly.")
+
+    def clear_memory(self) -> None:
+        """Clear retained conversation history for the current session."""
+        previous_turn_count = len(self.memory.get_state().turns)
+        self.memory.clear()
+        logger.info(
+            "event=agent_memory_cleared previous_turn_count=%d",
+            previous_turn_count,
+        )
 
     def _tool_error(
         self,
