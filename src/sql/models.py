@@ -12,6 +12,7 @@ class SQLOperation(str, Enum):
     LIST_OPEN_CASES = "list_open_cases"
     COUNT_CLIENTS_BY_LANGUAGE = "count_clients_by_language"
     RECENT_SERVICE_EVENTS = "recent_service_events"
+    NATURAL_LANGUAGE_QUERY = "natural_language_query"
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +20,7 @@ class SQLQueryResult:
     operation: SQLOperation
     rows: tuple[dict[str, Any], ...]
     truncated: bool
+    query_approved: bool | None = None
 
     @property
     def row_count(self) -> int:
@@ -31,4 +33,5 @@ class SQLQueryResult:
             "truncated": self.truncated,
             "source": "sql_query",
             "rows": list(self.rows),
+            "query_approved": self.query_approved,
         }

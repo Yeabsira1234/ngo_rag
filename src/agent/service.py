@@ -49,6 +49,9 @@ class AgentService:
     MAX_ITERATIONS_MESSAGE = (
         "The agent stopped because it reached its tool-call safety limit."
     )
+    REPEATED_TOOL_CALL_MESSAGE = (
+        "The agent stopped because it repeated an equivalent tool request."
+    )
     DEPENDENCY_ERROR_MESSAGE = "The agent could not complete the request."
     INSTRUCTIONS = (
         "You are a helpful assistant with three tools. Use document_search for "
@@ -57,7 +60,13 @@ class AgentService:
         "sample organization directory, such as its name, support hours, contact "
         "email, location, or service categories. Use sql_query for structured "
         "questions about offices, programs, staff, clients, cases, or service "
-        "events. Answer directly only when no tool is necessary. Do not invent facts."
+        "events. Always use sql_query with natural_language_query for comparisons, "
+        "rankings, grouped counts, 'most common', 'most', or other aggregate questions "
+        "that are not answered by one exact predefined operation. Pass the complete "
+        "user question and do not compose multiple predefined SQL calls. Predefined "
+        "operations remain available only when one operation fits exactly. Answer "
+        "directly only when no tool is "
+        "necessary. Do not invent facts."
     )
 
     def __init__(
@@ -96,6 +105,8 @@ class AgentService:
         citations: list[AgentCitation] = []
         tool_sources: list[str] = []
         used_provenance: set[ToolProvenance] = set()
+        executed_tool_calls: set[tuple[str, str]] = set()
+        natural_language_sql_executed = False
         logger.info(
             "event=agent_turn_started retained_turns=%d retained_messages=%d",
             len(state.turns),
@@ -205,7 +216,51 @@ class AgentService:
                     arguments = json.loads(tool_call.arguments)
                     if not isinstance(arguments, dict):
                         raise ValueError("Tool arguments must be a JSON object.")
+                    call_fingerprint = (
+                        tool_call.name,
+                        json.dumps(
+                            {
+                                key: " ".join(value.split())
+                                if isinstance(value, str)
+                                else value
+                                for key, value in arguments.items()
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    )
+                    if call_fingerprint in executed_tool_calls:
+                        logger.warning(
+                            "event=agent_repeated_tool_call tool_name=%s",
+                            tool_call.name,
+                        )
+                        return AgentResponse(
+                            answer=self.REPEATED_TOOL_CALL_MESSAGE,
+                            status=AgentStatus.TOOL_ERROR,
+                            citations=tuple(citations),
+                            document_tool_used=(
+                                ToolProvenance.DOCUMENT in used_provenance
+                            ),
+                            tool_sources=tuple(tool_sources),
+                        )
+                    is_natural_sql = (
+                        tool_call.name == "sql_query"
+                        and arguments.get("operation") == "natural_language_query"
+                    )
+                    if is_natural_sql and natural_language_sql_executed:
+                        logger.warning("event=agent_repeated_natural_sql_call")
+                        return AgentResponse(
+                            answer=self.REPEATED_TOOL_CALL_MESSAGE,
+                            status=AgentStatus.TOOL_ERROR,
+                            citations=tuple(citations),
+                            document_tool_used=False,
+                            tool_sources=tuple(tool_sources),
+                        )
                     result = tool.execute(arguments)
+                    executed_tool_calls.add(call_fingerprint)
+                    natural_language_sql_executed = (
+                        natural_language_sql_executed or is_natural_sql
+                    )
                 except (json.JSONDecodeError, TypeError, ValueError) as error:
                     logger.warning(
                         "event=agent_tool_arguments_invalid tool_name=%s "

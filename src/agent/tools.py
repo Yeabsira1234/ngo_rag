@@ -17,6 +17,9 @@ from src.agent.organization_data import (
 from src.rag_service import RAGService
 from src.sql.models import SQLOperation
 from src.sql.repository import SQLServerRepository, SQLToolError
+from src.sql.generation import SQLGenerationError
+from src.sql.natural_language import NaturalLanguageSQLService
+from src.sql.validation import SQLValidationError
 
 
 class AgentTool(Protocol):
@@ -171,8 +174,17 @@ class SQLQueryTool:
         "The structured database request could not be completed safely."
     )
 
-    def __init__(self, repository: SQLServerRepository) -> None:
+    POLICY_ERROR_MESSAGE = (
+        "The database request could not be completed under the read-only data policy."
+    )
+
+    def __init__(
+        self,
+        repository: SQLServerRepository,
+        natural_language_service: NaturalLanguageSQLService | None = None,
+    ) -> None:
         self.repository = repository
+        self.natural_language_service = natural_language_service
 
     @property
     def definition(self) -> ToolDefinition:
@@ -180,8 +192,12 @@ class SQLQueryTool:
             name=self.NAME,
             description=(
                 "Query the structured NGO database using one predefined "
-                "read-only operation. Use office_name only for office-filtered "
-                "operations and language only for count_clients_by_language."
+                "read-only operation. Use natural_language_query with question "
+                "for rankings, comparisons, grouped counts, most-common questions, "
+                "or any flexible aggregate question; answer these with one natural "
+                "language operation rather than chaining predefined operations. Use office_name "
+                "only for office-filtered predefined operations and language only "
+                "for count_clients_by_language."
             ),
             parameters={
                 "type": "object",
@@ -192,8 +208,9 @@ class SQLQueryTool:
                     },
                     "office_name": {"type": ["string", "null"]},
                     "language": {"type": ["string", "null"]},
+                    "question": {"type": ["string", "null"]},
                 },
-                "required": ["operation", "office_name", "language"],
+                "required": ["operation", "office_name", "language", "question"],
                 "additionalProperties": False,
             },
         )
@@ -206,25 +223,48 @@ class SQLQueryTool:
             operation = SQLOperation(raw_operation)
         except ValueError as error:
             raise ValueError("Unknown sql_query operation.") from error
-        if set(arguments) != {"operation", "office_name", "language"}:
+        if set(arguments) != {"operation", "office_name", "language", "question"}:
             raise ValueError("sql_query received malformed arguments.")
+        if operation is SQLOperation.NATURAL_LANGUAGE_QUERY:
+            question = arguments.get("question")
+            if (
+                self.natural_language_service is None
+                or not isinstance(question, str)
+                or not question.strip()
+                or arguments.get("office_name") is not None
+                or arguments.get("language") is not None
+            ):
+                raise ValueError("natural_language_query requires only a question.")
+            try:
+                result = self.natural_language_service.query(question.strip())
+            except (SQLGenerationError, SQLValidationError):
+                return self._safe_error(self.POLICY_ERROR_MESSAGE, operation)
+            except SQLToolError:
+                return self._safe_error(self.SAFE_ERROR_MESSAGE, operation)
+            return self._answered(result, operation)
         parameters = {
             key: value
             for key, value in arguments.items()
-            if key != "operation" and value is not None
+            if key in {"office_name", "language"} and value is not None
         }
         try:
             result = self.repository.execute(operation, parameters)
         except SQLToolError:
-            return ToolExecutionResult(
-                answer=self.SAFE_ERROR_MESSAGE,
-                status=ToolExecutionStatus.ERROR,
-                citations=(),
-                rag_llm_called=False,
-                source=self.NAME,
-                provenance=ToolProvenance.STRUCTURED_SQL_DATA,
-                category=operation.value,
-            )
+            return self._safe_error(self.SAFE_ERROR_MESSAGE, operation)
+        return self._answered(result, operation)
+
+    def _safe_error(self, message: str, operation: SQLOperation) -> ToolExecutionResult:
+        return ToolExecutionResult(
+            answer=message,
+            status=ToolExecutionStatus.ERROR,
+            citations=(),
+            rag_llm_called=False,
+            source=self.NAME,
+            provenance=ToolProvenance.STRUCTURED_SQL_DATA,
+            category=operation.value,
+        )
+
+    def _answered(self, result: Any, operation: SQLOperation) -> ToolExecutionResult:
         return ToolExecutionResult(
             answer=json.dumps(result.to_model_output(), default=str),
             status=ToolExecutionStatus.ANSWERED,

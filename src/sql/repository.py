@@ -53,7 +53,6 @@ class SQLServerRepository:
         self.max_rows = max_rows
 
     def execute(self, operation: SQLOperation, parameters: Mapping[str, Any]) -> SQLQueryResult:
-        started = time.monotonic()
         query = QUERIES.get(operation)
         if query is None:
             raise SQLUnknownOperationError("Unsupported SQL operation.")
@@ -73,6 +72,27 @@ class SQLServerRepository:
             if not isinstance(value, str) or not value.strip() or len(value) > 150:
                 raise SQLInvalidParametersError(f"{expected} must be a non-empty string.")
             values = (value.strip(),)
+        return self._execute_query(operation, query, values)
+
+    def execute_generated(
+        self, sql: str, parameters: tuple[object, ...]
+    ) -> SQLQueryResult:
+        return self._execute_query(
+            SQLOperation.NATURAL_LANGUAGE_QUERY,
+            sql,
+            parameters,
+            query_approved=True,
+        )
+
+    def _execute_query(
+        self,
+        operation: SQLOperation,
+        query: str,
+        values: tuple[Any, ...],
+        *,
+        query_approved: bool | None = None,
+    ) -> SQLQueryResult:
+        started = time.monotonic()
         connection = cursor = None
         try:
             connection = self.connection_factory()
@@ -85,7 +105,9 @@ class SQLServerRepository:
                 {name: _serialize(value) for name, value in zip(columns, row, strict=True)}
                 for row in raw_rows[: self.max_rows]
             )
-            result = SQLQueryResult(operation, rows, len(raw_rows) > self.max_rows)
+            result = SQLQueryResult(
+                operation, rows, len(raw_rows) > self.max_rows, query_approved
+            )
             logger.info("event=sql_query_completed operation=%s duration_ms=%d row_count=%d truncated=%s", operation.value, int((time.monotonic()-started)*1000), result.row_count, result.truncated)
             return result
         except SQLToolError:

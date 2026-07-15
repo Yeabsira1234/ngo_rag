@@ -22,7 +22,10 @@ def _repository(rows, *, max_rows=2):
     return repository, cursor
 
 
-@pytest.mark.parametrize("operation", list(SQLOperation))
+@pytest.mark.parametrize(
+    "operation",
+    [operation for operation in SQLOperation if operation is not SQLOperation.NATURAL_LANGUAGE_QUERY],
+)
 def test_each_operation_uses_its_predefined_select(operation) -> None:
     parameters = {}
     if operation in {
@@ -69,6 +72,21 @@ def test_row_limit_and_truncation_are_enforced() -> None:
     result = repository.execute(SQLOperation.LIST_OFFICES, {})
     cursor.fetchmany.assert_called_once_with(3)
     assert result.row_count == 2
+    assert result.truncated is True
+
+
+def test_generated_query_uses_parameters_and_independent_row_cap() -> None:
+    repository, cursor = _repository([(1,), (2,), (3,)], max_rows=2)
+    result = repository.execute_generated(
+        "SELECT TOP (2) o.OfficeName FROM dbo.Offices AS o WHERE o.City = ?",
+        ("Alexandria",),
+    )
+    cursor.execute.assert_called_once_with(
+        "SELECT TOP (2) o.OfficeName FROM dbo.Offices AS o WHERE o.City = ?",
+        "Alexandria",
+    )
+    cursor.fetchmany.assert_called_once_with(3)
+    assert result.query_approved is True
     assert result.truncated is True
 
 

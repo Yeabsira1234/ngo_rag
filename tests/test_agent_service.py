@@ -410,6 +410,72 @@ def test_maximum_tool_iterations_prevents_infinite_loop() -> None:
     assert model.respond.call_count == 2
 
 
+def test_repeated_equivalent_sql_tool_call_executes_only_once() -> None:
+    sql_tool = Mock()
+    sql_tool.definition = ToolDefinition(
+        name="sql_query", description="SQL", parameters={"type": "object"}
+    )
+    sql_tool.execute.return_value = ToolExecutionResult(
+        answer="result", status=ToolExecutionStatus.ANSWERED, citations=(),
+        rag_llm_called=False, source="sql_query",
+        provenance=ToolProvenance.STRUCTURED_SQL_DATA,
+        category="natural_language_query",
+    )
+    first = ToolCall(
+        "call-1", "sql_query",
+        '{"operation":"natural_language_query","question":"Which office has the most active programs?","office_name":null,"language":null}',
+    )
+    equivalent = ToolCall(
+        "call-2", "sql_query",
+        '{"language":null,"question":"  Which office has the most active programs?  ","office_name":null,"operation":"natural_language_query"}',
+    )
+    model = Mock()
+    model.respond.side_effect = [
+        _model_response(tool_call=first),
+        _model_response(tool_call=equivalent),
+    ]
+    response = AgentService(
+        model=model, tools=(sql_tool,), memory=_memory()
+    ).answer("Which office has the most active programs?")
+    assert response.status is AgentStatus.TOOL_ERROR
+    assert response.answer == AgentService.REPEATED_TOOL_CALL_MESSAGE
+    sql_tool.execute.assert_called_once()
+
+
+def test_natural_sql_is_limited_to_one_execution_per_turn() -> None:
+    sql_tool = Mock()
+    sql_tool.definition = ToolDefinition(
+        name="sql_query", description="SQL", parameters={"type": "object"}
+    )
+    sql_tool.execute.return_value = ToolExecutionResult(
+        answer="result", status=ToolExecutionStatus.ANSWERED, citations=(),
+        rag_llm_called=False, source="sql_query",
+        provenance=ToolProvenance.STRUCTURED_SQL_DATA,
+        category="natural_language_query",
+    )
+    model = Mock()
+    model.respond.side_effect = [
+        _model_response(tool_call=ToolCall(
+            "call-1", "sql_query",
+            '{"operation":"natural_language_query","question":"office ranking","office_name":null,"language":null}',
+        )),
+        _model_response(tool_call=ToolCall(
+            "call-2", "sql_query",
+            '{"operation":"natural_language_query","question":"try another ranking","office_name":null,"language":null}',
+        )),
+    ]
+    response = AgentService(
+        model=model, tools=(sql_tool,), memory=_memory()
+    ).answer("Which office has the most active programs?")
+    assert response.status is AgentStatus.TOOL_ERROR
+    assert sql_tool.execute.call_count == 1
+
+
+def test_grouped_sql_routing_instruction_prefers_natural_language_query() -> None:
+    assert "Always use sql_query with natural_language_query" in AgentService.INSTRUCTIONS
+    assert "most common" in AgentService.INSTRUCTIONS
+
+
 @pytest.mark.parametrize("question", ["", "   ", "\n\t"])
 def test_empty_question_does_not_call_model_or_tools(question: str) -> None:
     model = Mock()

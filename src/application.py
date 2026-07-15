@@ -16,6 +16,10 @@ from src.ingestion import CollectionIngestionService
 from src.loaders.pdf_loader import PDFLoader
 from src.sql.connection import build_connection_factory
 from src.sql.repository import SQLServerRepository
+from src.sql.generation import OpenAISQLGenerator
+from src.sql.natural_language import NaturalLanguageSQLService
+from src.sql.schema import APPROVED_SCHEMA
+from src.sql.validation import SQLValidator
 
 
 def build_rag_service(settings: Settings) -> RAGService:
@@ -64,17 +68,29 @@ def build_agent_service(settings: Settings) -> AgentService:
         client=openai_client.responses,
         model=settings.llm_model,
     )
+    sql_repository = SQLServerRepository(
+        build_connection_factory(settings),
+        timeout_seconds=settings.sql_query_timeout_seconds,
+        max_rows=settings.sql_max_rows,
+    )
+    natural_language_sql = NaturalLanguageSQLService(
+        generator=OpenAISQLGenerator(
+            client=openai_client.responses,
+            model=settings.llm_model,
+            schema=APPROVED_SCHEMA,
+            max_rows=settings.sql_max_rows,
+        ),
+        validator=SQLValidator(APPROVED_SCHEMA, settings.sql_max_rows),
+        repository=sql_repository,
+    )
     return AgentService(
         model=model,
         tools=(
             DocumentSearchTool(rag_service),
             OrganizationInfoTool(),
             SQLQueryTool(
-                SQLServerRepository(
-                    build_connection_factory(settings),
-                    timeout_seconds=settings.sql_query_timeout_seconds,
-                    max_rows=settings.sql_max_rows,
-                )
+                sql_repository,
+                natural_language_sql,
             ),
         ),
         memory=InMemoryConversationMemory(

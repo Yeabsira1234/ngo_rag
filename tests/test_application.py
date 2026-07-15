@@ -104,7 +104,8 @@ def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> Non
         timeout_seconds=settings.sql_query_timeout_seconds,
         max_rows=settings.sql_max_rows,
     )
-    sql_tool_class.assert_called_once_with(sql_repository)
+    sql_tool_class.assert_called_once()
+    assert sql_tool_class.call_args.args[0] is sql_repository
     memory_class.assert_called_once_with(
         max_turns=settings.agent_memory_max_turns
     )

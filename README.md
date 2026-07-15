@@ -509,7 +509,44 @@ are not accepted.
 Example agent questions include “How many open cases are there?”, “Which
 programs are offered by the Northern Virginia Office?”, “How many clients
 prefer Amharic?”, and “What recent services were provided?”. Unrestricted
-natural-language-to-SQL is intentionally deferred to a later step.
+These questions can use predefined operations when an exact safe mapping exists.
+
+### Natural-language SQL
+
+The separate `natural_language_query` operation supports flexible questions.
+An OpenAI structured-output boundary receives only a checked-in catalog for the
+approved `dbo` tables: `Offices`, `Programs`, `Staff`, `Clients`, `Cases`,
+`ServiceEvents`, and `Referrals`, including approved columns and relationships.
+It receives no credentials, connection settings, row contents, document text,
+or unrelated tool output.
+
+Generated SQL is always treated as untrusted. Before execution, a structural
+SQL lexer and catalog-aware validator requires one bounded `SELECT`, explicit
+approved columns, approved `dbo` tables, safe aliases, matching parameters, and
+`TOP` no greater than `SQL_MAX_ROWS`. It rejects comments, batches, wildcards,
+writes, DDL, procedures, dynamic SQL, CTEs, system catalogs, cross-database
+references, unknown tables or columns, and embedded string literals. The
+repository independently applies its timeout and reads no more than
+`SQL_MAX_ROWS + 1` rows.
+
+Client privacy defaults to aggregates. The catalog omits direct client codes;
+internal identity columns may support joins but cannot appear in projections.
+Broad client-record and explicit safety-bypass requests are rejected before
+generation. Generated SQL is not shown to CLI or Streamlit users, and logs
+contain only validation outcomes and query fingerprints.
+
+Supported examples include:
+
+- Which office has the most active programs?
+- How many open cases are assigned to each staff member?
+- Which preferred languages are most common among open clients?
+- What are the five most recent service events?
+- Which program category has the most open cases?
+- How many staff members work in each office?
+
+Requests to delete cases, run `xp_cmdshell`, read another database, return every
+client identifier, or select every row are rejected and never executed. The
+predefined operations remain available as the preferred fallback when they fit.
 
 ## Known limitations
 
@@ -520,8 +557,8 @@ natural-language-to-SQL is intentionally deferred to a later step.
 - The relevance threshold has not been evaluated on a labeled benchmark.
 - Re-ingestion does not yet remove stale records when chunk identifiers change.
 - Streamlit agent memory is isolated per browser session but is not durable.
-- The agent has document-search, fictional organization-information, and
-  predefined read-only SQL tools only.
+- Natural-language SQL supports a deliberately limited SQL Server `SELECT`
+  subset and the checked-in fictional schema only.
 - Structured organization data is static sample data, not a production system
   of record.
 - Agent memory is not shared across processes and is not durable.
@@ -535,8 +572,7 @@ natural-language-to-SQL is intentionally deferred to a later step.
 Planned work will be introduced incrementally:
 
 1. RAG evaluation datasets, retrieval metrics, and answer-quality evaluation
-2. Approved production tools such as additional organizational APIs and
-   carefully governed natural-language-to-SQL
+2. Approved production tools such as additional organizational APIs
 3. Docker packaging
 4. Monitoring, tracing, and operational dashboards
 5. CI/CD and security controls
