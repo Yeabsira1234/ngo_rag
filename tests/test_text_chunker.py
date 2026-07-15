@@ -67,3 +67,12 @@ def test_split_documents_does_not_create_chunks_for_empty_pages() -> None:
     ]
 
     assert TextChunker().split_documents(documents) == []
+
+
+def test_chunk_indices_restart_for_each_document() -> None:
+    documents = [
+        Document("first", DocumentMetadata("same.pdf", 1, document_id="one")),
+        Document("second", DocumentMetadata("same.pdf", 1, document_id="two")),
+    ]
+    chunks = TextChunker().split_documents(documents)
+    assert [chunk.metadata.chunk_index for chunk in chunks] == [0, 0]

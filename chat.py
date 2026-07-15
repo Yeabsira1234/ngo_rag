@@ -77,7 +77,8 @@ def run() -> int:
 
         for index, citation in enumerate(response.citations, start=1):
             print(
-                f"{index}. {citation.source}, page {citation.page_number}, "
+                f"{index}. {citation.source_relative_path or citation.source}, "
+                f"page {citation.page_number}, "
                 f"chunk {citation.chunk_index}, "
                 f"distance {citation.distance:.4f}"
             )

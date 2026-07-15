@@ -33,7 +33,8 @@ or a direct answer.
 Ingestion and question answering are separate workflows:
 
 ```text
-PDF
+Configured PDF directory
+  -> PDFDocumentDiscovery (stable, validated collection)
   -> PDFLoader (one document per page)
   -> TextChunker (metadata-preserving chunks)
   -> OpenAIEmbeddingService
@@ -166,7 +167,8 @@ The available settings are:
 | `OPENAI_EMBEDDING_MODEL` | Embedding model | `text-embedding-3-small` |
 | `OPENAI_LLM_MODEL` | Answer-generation model | `gpt-4.1-mini` |
 | `LOG_LEVEL` | Application log verbosity | `INFO` |
-| `DOCUMENT_PATH` | PDF to ingest | `data/samples/sample_document.pdf` |
+| `DOCUMENTS_DIRECTORY` | Directory containing PDFs to ingest | `data/samples` |
+| `DOCUMENT_GLOB` | PDF discovery pattern | `*.pdf` |
 | `CHUNK_SIZE` | Chunk size in characters | `800` |
 | `CHUNK_OVERLAP` | Character overlap between chunks | `150` |
 | `CHROMA_COLLECTION_NAME` | Chroma collection | `ngo_documents` |
@@ -176,6 +178,10 @@ The available settings are:
 | `AGENT_MAX_TOOL_ITERATIONS` | Maximum agent tool-call rounds | `2` |
 | `AGENT_MEMORY_MAX_TURNS` | Complete agent turns retained in memory | `10` |
 
+The old `DOCUMENT_PATH` setting was removed rather than deprecated: ingestion
+now always targets one explicitly configured directory and glob, avoiding two
+competing sources of truth.
+
 `.env` is ignored by Git. Never commit API keys or other credentials.
 
 ## Documents and privacy
@@ -183,16 +189,19 @@ The available settings are:
 The repository permits committed PDFs only under `data/samples/`. A document
 must be reviewed and confirmed safe before it is added there.
 
-Place internal or sensitive documents under `data/private/`, for example:
+Place internal or sensitive PDFs under `data/private/`. To include nested
+folders, use `**/*.pdf`:
 
 ```text
 data/private/handbook.pdf
+data/private/policies/leave.pdf
 ```
 
 Then update `.env`:
 
 ```env
-DOCUMENT_PATH=data/private/handbook.pdf
+DOCUMENTS_DIRECTORY=data/private
+DOCUMENT_GLOB=**/*.pdf
 ```
 
 PDFs outside `data/samples/` are ignored by Git. This is a repository safeguard,
@@ -201,17 +210,35 @@ sent to the configured OpenAI embedding API. Retrieved passages are also sent
 to the answer-generation API. Confirm organizational approval and applicable
 data-handling requirements before using internal documents.
 
-## Ingesting a PDF
+## Ingesting a document collection
 
-Set `DOCUMENT_PATH`, then run:
+Set `DOCUMENTS_DIRECTORY` and `DOCUMENT_GLOB`, then run:
 
 ```bash
 python ingest.py
 ```
 
-Ingestion loads every PDF page, creates metadata-preserving chunks, requests
-embeddings, and writes them to the configured Chroma directory. A successful run
-reports the number of stored chunks.
+Discovery sorts matching PDFs deterministically and ignores hidden, temporary,
+zero-byte, directory, and unsupported entries. Ingestion continues when an
+individual PDF is unreadable, reports failures, and succeeds only if at least
+one document produces chunks. It reports discovered and processed documents,
+pages, chunks, and skipped or failed documents.
+
+Each page and chunk carries the filename, collection-relative path, physical
+page number, per-document chunk index, and a stable `document_id`. The document
+ID is the first 24 hexadecimal characters of SHA-256 over the normalized
+relative path; it never exposes an absolute path and distinguishes equal
+filenames in different folders. Chunk indices restart at zero for each document.
+Chroma IDs combine `document_id`, page number, and chunk index.
+
+Ingestion uses deterministic Chroma upserts, so running it repeatedly does not
+duplicate unchanged chunks. It also removes vectors whose document IDs are no
+longer present in the discovered collection. If a still-present PDF fails to
+load, its old vectors are retained so a transient read failure does not erase
+previously usable data. Changing a file's contents without changing its path
+reuses record IDs; if the new version produces fewer chunks, surplus old chunks
+for that same document are not yet removed and require rebuilding the local
+Chroma directory.
 
 If the stored schema, chunking configuration, embedding model, or source
 document changes, rebuild the generated Chroma data before evaluating retrieval.
@@ -444,7 +471,7 @@ natural-language-to-SQL is intentionally deferred to a later step.
 
 ## Known limitations
 
-- One configured PDF is ingested per command invocation.
+- Browser document upload is not available yet; it is planned for Step 15.
 - Chunking is character-based rather than token-, sentence-, or section-aware.
 - Image-only PDFs require OCR, which is not currently implemented.
 - The relevance threshold has not been evaluated on a labeled benchmark.

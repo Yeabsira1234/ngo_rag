@@ -34,6 +34,8 @@ class CitationResponse(BaseModel):
     page_number: int
     chunk_index: int
     distance: float
+    source_relative_path: str
+    document_id: str
 
     @classmethod
     def from_source_reference(
@@ -45,6 +47,8 @@ class CitationResponse(BaseModel):
             page_number=citation.page_number,
             chunk_index=citation.chunk_index,
             distance=citation.distance,
+            source_relative_path=citation.source_relative_path,
+            document_id=citation.document_id,
         )
 
 

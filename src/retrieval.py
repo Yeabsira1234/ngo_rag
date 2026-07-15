@@ -12,12 +12,18 @@ class RetrievalResult:
     page_number: int
     chunk_index: int
     distance: float
+    source_relative_path: str = ""
+    document_id: str = ""
 
     def __post_init__(self) -> None:
         if not self.chunk_text.strip():
             raise ValueError("chunk_text cannot be empty.")
         if not self.source.strip():
             raise ValueError("source cannot be empty.")
+        if not self.source_relative_path:
+            object.__setattr__(self, "source_relative_path", self.source)
+        if not self.document_id:
+            object.__setattr__(self, "document_id", self.source)
         if self.page_number <= 0:
             raise ValueError("page_number must be greater than zero.")
         if self.chunk_index < 0:
@@ -43,6 +49,8 @@ class RetrievalResult:
             page_number=_required_int(metadata, "page_number"),
             chunk_index=_required_int(metadata, "chunk_index"),
             distance=float(distance),
+            source_relative_path=_optional_string(metadata, "source_relative_path", source),
+            document_id=_optional_string(metadata, "document_id", source),
         )
 
     def is_relevant(self, max_distance: float) -> bool:
@@ -58,4 +66,11 @@ def _required_int(metadata: Mapping[str, object], key: str) -> int:
     value = metadata.get(key)
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError(f"Chroma metadata must contain an integer {key}.")
+    return value
+
+
+def _optional_string(metadata: Mapping[str, object], key: str, default: str) -> str:
+    value = metadata.get(key, default)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"Chroma metadata {key} must be a non-empty string.")
     return value

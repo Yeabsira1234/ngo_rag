@@ -53,9 +53,11 @@ class TextChunker:
     ) -> list[Document]:
         """Chunk documents while preserving their source and page metadata."""
         chunked_documents: list[Document] = []
-        chunk_indices = count()
-
+        document_counters: dict[str, count] = {}
         for document in documents:
+            chunk_indices = document_counters.setdefault(
+                document.metadata.document_id, count()
+            )
             text_chunks = self.split(document.page_content)
             chunked_documents.extend(
                 Document(

@@ -10,7 +10,8 @@ def test_settings_use_current_application_defaults() -> None:
 
     assert settings.embedding_model == "text-embedding-3-small"
     assert settings.llm_model == "gpt-4.1-mini"
-    assert settings.document_path == Path("data/samples/sample_document.pdf")
+    assert settings.documents_directory == Path("data/samples")
+    assert settings.document_glob == "*.pdf"
     assert settings.chunk_size == 800
     assert settings.chunk_overlap == 150
     assert settings.chroma_collection_name == "ngo_documents"
@@ -32,7 +33,8 @@ def test_settings_read_environment_overrides() -> None:
             "OPENAI_API_KEY": "test-key",
             "OPENAI_EMBEDDING_MODEL": "embedding-model",
             "OPENAI_LLM_MODEL": "llm-model",
-            "DOCUMENT_PATH": "data/another.pdf",
+            "DOCUMENTS_DIRECTORY": "data/approved",
+            "DOCUMENT_GLOB": "**/*.pdf",
             "CHUNK_SIZE": "1000",
             "CHUNK_OVERLAP": "200",
             "CHROMA_COLLECTION_NAME": "documents",
@@ -48,7 +50,8 @@ def test_settings_read_environment_overrides() -> None:
     assert settings.openai_api_key == "test-key"
     assert settings.embedding_model == "embedding-model"
     assert settings.llm_model == "llm-model"
-    assert settings.document_path == Path("data/another.pdf")
+    assert settings.documents_directory == Path("data/approved")
+    assert settings.document_glob == "**/*.pdf"
     assert settings.chunk_size == 1000
     assert settings.chunk_overlap == 200
     assert settings.chroma_collection_name == "documents"

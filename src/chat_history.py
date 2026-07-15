@@ -65,6 +65,7 @@ def append_safe_error(messages: list[ChatMessage]) -> None:
 
 def format_citation(citation: SourceReference) -> str:
     return (
-        f"{citation.source} · Page {citation.page_number} · "
+        f"{citation.source_relative_path or citation.source} · "
+        f"Page {citation.page_number} · "
         f"Chunk {citation.chunk_index} · Distance {citation.distance:.4f}"
     )

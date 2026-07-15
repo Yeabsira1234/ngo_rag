@@ -31,6 +31,14 @@ class SourceReference:
     page_number: int
     chunk_index: int
     distance: float
+    source_relative_path: str = ""
+    document_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.source_relative_path:
+            object.__setattr__(self, "source_relative_path", self.source)
+        if not self.document_id:
+            object.__setattr__(self, "document_id", self.source)
 
     @classmethod
     def from_retrieval_result(
@@ -42,6 +50,8 @@ class SourceReference:
             page_number=result.page_number,
             chunk_index=result.chunk_index,
             distance=result.distance,
+            source_relative_path=result.source_relative_path,
+            document_id=result.document_id,
         )
 
 

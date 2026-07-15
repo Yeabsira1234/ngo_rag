@@ -33,7 +33,7 @@ class RAGPromptBuilder:
 
         context = "\n\n---\n\n".join(
             (
-                f"[Source: {result.source}, page {result.page_number}, "
+                f"[Source: {result.source_relative_path}, page {result.page_number}, "
                 f"chunk {result.chunk_index}]\n{result.chunk_text}"
             )
             for result in results

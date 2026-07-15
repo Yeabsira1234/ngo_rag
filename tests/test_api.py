@@ -63,7 +63,9 @@ def test_answered_response_serializes_citations() -> None:
                 "source": "sample_document.pdf",
                 "page_number": 1,
                 "chunk_index": 0,
-                "distance": 0.7207,
+                    "distance": 0.7207,
+                    "source_relative_path": "sample_document.pdf",
+                    "document_id": "sample_document.pdf",
             }
         ],
     }

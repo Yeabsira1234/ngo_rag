@@ -66,9 +66,23 @@ class ChromaVectorStore:
     def _document_id(document: Document) -> str:
         metadata = document.metadata
         return (
-            f"{metadata.source}-page-{metadata.page_number}"
+            f"{metadata.document_id}-page-{metadata.page_number}"
             f"-chunk-{metadata.chunk_index}"
         )
+
+    def remove_stale_documents(self, active_document_ids: set[str]) -> int:
+        """Remove vectors belonging to documents absent from discovery."""
+        stored = self.collection.get(include=["metadatas"])
+        ids = stored.get("ids") or []
+        metadatas = stored.get("metadatas") or []
+        stale_ids = [
+            record_id
+            for record_id, metadata in zip(ids, metadatas, strict=True)
+            if metadata.get("document_id") not in active_document_ids
+        ]
+        if stale_ids:
+            self.collection.delete(ids=stale_ids)
+        return len(stale_ids)
 
     def search(
         self,

@@ -77,7 +77,7 @@ def render_sidebar(settings: Settings) -> None:
     with st.sidebar:
         st.header("Configuration")
         st.caption("Document")
-        st.code(settings.document_path.name, language=None)
+        st.code(str(settings.documents_directory), language=None)
         st.caption("Models")
         st.write(f"Answer: `{settings.llm_model}`")
         st.write(f"Embeddings: `{settings.embedding_model}`")
