@@ -5,9 +5,9 @@ answering questions from PDF documents. The project extracts page-aware text,
 creates OpenAI embeddings, stores them in ChromaDB, retrieves relevant chunks,
 and generates grounded answers with citations.
 
-The project includes both a Streamlit web chat and a command-line interface.
-Both call the same RAG service, keeping retrieval and answer-generation logic
-out of the presentation layers.
+The project includes a FastAPI HTTP API, Streamlit web chat, and command-line
+interface. All three call the same RAG service, keeping retrieval and
+answer-generation logic out of the transport and presentation layers.
 
 ## Current features
 
@@ -21,6 +21,7 @@ out of the presentation layers.
 - Centralized prompt construction and RAG orchestration
 - Safe CLI error handling and structured file logging
 - Streamlit chat interface with visible browser-session history
+- Versioned FastAPI question-answering endpoint and health check
 - API-key redaction in application logs
 - Unit tests that do not require OpenAI or a real Chroma database
 
@@ -36,7 +37,7 @@ PDF
   -> ChromaVectorStore
 
 Question
-  -> streamlit_app.py or chat.py
+  -> api.py, streamlit_app.py, or chat.py
   -> RAGService
       -> OpenAIEmbeddingService
       -> ChromaVectorStore (typed results + distance filtering)
@@ -45,8 +46,8 @@ Question
   -> RAGResponse (answer, status, citations, LLM-called flag)
 ```
 
-`streamlit_app.py` and `chat.py` are intentionally thin presentation layers.
-They use the same application factory and do not contain retrieval,
+`api.py`, `streamlit_app.py`, and `chat.py` are intentionally thin boundary
+layers. They use the same application factory and do not contain retrieval,
 relevance-filtering, or prompt-building logic.
 
 ## Repository structure
@@ -54,6 +55,7 @@ relevance-filtering, or prompt-building logic.
 ```text
 .
 |-- chat.py                         # Interactive chat CLI
+|-- api.py                          # FastAPI HTTP entry point
 |-- streamlit_app.py               # Streamlit web chat
 |-- ingest.py                       # PDF ingestion CLI
 |-- requirements.txt               # Direct Python dependencies
@@ -69,6 +71,7 @@ relevance-filtering, or prompt-building logic.
 |   |-- vectorstore/chroma_store.py
 |   |-- config.py                   # Typed environment settings
 |   |-- application.py              # Shared dependency factory
+|   |-- api_models.py               # Typed HTTP request/response schemas
 |   |-- chat_history.py             # Visible UI-session message models
 |   |-- documents.py                # Page and chunk document models
 |   |-- logging_config.py           # Centralized logging and redaction
@@ -219,6 +222,67 @@ during the current browser session. This is not semantic conversation memory:
 previous messages are not sent to `RAGService` or the LLM, and each question is
 answered independently.
 
+## Running the FastAPI service
+
+FastAPI and Uvicorn are installed through `requirements.txt`. After configuring
+the environment and ingesting a document, start the development API from the
+repository root:
+
+```bash
+python -m uvicorn api:app --reload
+```
+
+The service is available at `http://127.0.0.1:8000`. Interactive Swagger UI is
+available at:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+The health endpoint does not call OpenAI:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+Submit a question with:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"What are the support office hours?"}'
+```
+
+An answered response has this shape:
+
+```json
+{
+  "answer": "The support office is open Monday through Friday...",
+  "status": "answered",
+  "llm_called": true,
+  "citations": [
+    {
+      "source": "sample_document.pdf",
+      "page_number": 1,
+      "chunk_index": 0,
+      "distance": 0.7207
+    }
+  ]
+}
+```
+
+API status behavior:
+
+- `200`: answered or insufficient-context result. Insufficient context is an
+  expected RAG outcome, not an infrastructure error.
+- `422`: missing, malformed, empty, or whitespace-only question.
+- `503`: embedding, retrieval, Chroma, or LLM dependency failure.
+- `500`: unexpected application failure.
+
+Error responses contain safe generic messages; technical details are written
+to the application log. Authentication and authorization are not implemented
+yet, so this API must not be exposed publicly.
+
 ## Relevance filtering
 
 The current Chroma collection uses L2 distance:
@@ -289,13 +353,12 @@ requests or require the project's persistent Chroma database.
 
 Planned work will be introduced incrementally:
 
-1. FastAPI service boundary
-2. RAG evaluation datasets, retrieval metrics, and answer-quality evaluation
-3. Agent capabilities and approved tool calling
-4. Docker packaging
-5. Monitoring, tracing, and operational dashboards
-6. CI/CD and security controls
-7. Azure deployment and managed production infrastructure
+1. RAG evaluation datasets, retrieval metrics, and answer-quality evaluation
+2. Agent capabilities and approved tool calling
+3. Docker packaging
+4. Monitoring, tracing, and operational dashboards
+5. CI/CD and security controls
+6. Azure deployment and managed production infrastructure
 
 Each phase should preserve the typed RAG service as the core application layer
 and add production controls in proportion to deployment risk.

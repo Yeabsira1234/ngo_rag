@@ -3,7 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from src.prompting import RAGPromptBuilder
-from src.rag_service import RAGService, RAGStatus
+from src.rag_service import RAGDependencyError, RAGService, RAGStatus
 from src.retrieval import RetrievalResult
 
 
@@ -144,9 +144,10 @@ def test_dependency_failures_are_not_silently_swallowed() -> None:
     answer_generator = Mock()
     service = _service(embedding_provider, retriever, answer_generator)
 
-    with pytest.raises(RuntimeError, match="retrieval unavailable"):
+    with pytest.raises(RAGDependencyError) as raised:
         service.answer("A question")
 
+    assert isinstance(raised.value.__cause__, RuntimeError)
     answer_generator.generate_answer.assert_not_called()
 
 
@@ -161,5 +162,7 @@ def test_llm_failures_are_not_silently_swallowed() -> None:
     )
     service = _service(embedding_provider, retriever, answer_generator)
 
-    with pytest.raises(RuntimeError, match="LLM unavailable"):
+    with pytest.raises(RAGDependencyError) as raised:
         service.answer("A question")
+
+    assert isinstance(raised.value.__cause__, RuntimeError)

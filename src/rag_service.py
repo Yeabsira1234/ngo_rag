@@ -11,6 +11,14 @@ from src.retrieval import RetrievalResult
 logger = logging.getLogger(__name__)
 
 
+class RAGServiceError(RuntimeError):
+    """Base exception for failures while answering a RAG request."""
+
+
+class RAGDependencyError(RAGServiceError):
+    """Raised when an external RAG dependency cannot complete its work."""
+
+
 class RAGStatus(str, Enum):
     ANSWERED = "answered"
     INSUFFICIENT_CONTEXT = "insufficient_context"
@@ -128,7 +136,9 @@ class RAGService:
                 type(error).__name__,
                 question_length,
             )
-            raise
+            raise RAGDependencyError(
+                "The embedding service could not complete the request."
+            ) from error
 
         logger.info(
             "event=rag_retrieval_started requested_results=%d "
@@ -149,7 +159,9 @@ class RAGService:
                 type(error).__name__,
                 question_length,
             )
-            raise
+            raise RAGDependencyError(
+                "The retrieval service could not complete the request."
+            ) from error
 
         relevant_results = [
             result
@@ -198,7 +210,9 @@ class RAGService:
                 "event=rag_llm_invocation_failed error_type=%s",
                 type(error).__name__,
             )
-            raise
+            raise RAGDependencyError(
+                "The answer-generation service could not complete the request."
+            ) from error
 
         logger.info("event=rag_llm_invocation_completed")
         citations = tuple(
