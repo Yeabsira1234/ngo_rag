@@ -70,6 +70,7 @@ class AgentCitation:
 class AgentStatus(str, Enum):
     DIRECT_ANSWER = "direct_answer"
     DOCUMENT_ANSWER = "document_answer"
+    ORGANIZATION_ANSWER = "organization_answer"
     INVALID_QUESTION = "invalid_question"
     TOOL_ERROR = "tool_error"
     MAX_ITERATIONS = "max_iterations"
@@ -83,6 +84,23 @@ class AgentResponse:
     status: AgentStatus
     citations: tuple[AgentCitation, ...]
     document_tool_used: bool
+    tool_sources: tuple[str, ...] = ()
+
+
+class ToolExecutionStatus(str, Enum):
+    ANSWERED = "answered"
+    INSUFFICIENT_CONTEXT = "insufficient_context"
+    INVALID_QUESTION = "invalid_question"
+    NOT_FOUND = "not_found"
+
+    @classmethod
+    def from_rag_status(cls, status: RAGStatus) -> "ToolExecutionStatus":
+        return cls(status.value)
+
+
+class ToolProvenance(str, Enum):
+    DOCUMENT = "document"
+    STRUCTURED_ORGANIZATION_DATA = "structured_organization_data"
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,9 +108,12 @@ class ToolExecutionResult:
     """Structured output produced by an application tool."""
 
     answer: str
-    status: RAGStatus
+    status: ToolExecutionStatus
     citations: tuple[AgentCitation, ...]
     rag_llm_called: bool
+    source: str
+    provenance: ToolProvenance
+    category: str | None = None
 
     def to_model_output(self) -> dict[str, Any]:
         return {
@@ -108,4 +129,7 @@ class ToolExecutionResult:
                 for citation in self.citations
             ],
             "llm_called": self.rag_llm_called,
+            "source": self.source,
+            "provenance": self.provenance.value,
+            "category": self.category,
         }

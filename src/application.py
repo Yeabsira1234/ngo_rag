@@ -3,7 +3,7 @@ from openai import OpenAI
 from src.agent.openai_model import OpenAIAgentModel
 from src.agent.memory import InMemoryConversationMemory
 from src.agent.service import AgentService
-from src.agent.tools import DocumentSearchTool
+from src.agent.tools import DocumentSearchTool, OrganizationInfoTool
 from src.config import Settings
 from src.embeddings.openai_embeddings import OpenAIEmbeddingService
 from src.llm.openai_llm import OpenAILLMService
@@ -37,7 +37,7 @@ def build_rag_service(settings: Settings) -> RAGService:
 
 
 def build_agent_service(settings: Settings) -> AgentService:
-    """Construct the agent with the existing RAG service as its only tool."""
+    """Construct the agent and register its injected application tools."""
     rag_service = build_rag_service(settings)
     openai_client = OpenAI(api_key=settings.openai_api_key)
     model = OpenAIAgentModel(
@@ -46,7 +46,7 @@ def build_agent_service(settings: Settings) -> AgentService:
     )
     return AgentService(
         model=model,
-        tools=(DocumentSearchTool(rag_service),),
+        tools=(DocumentSearchTool(rag_service), OrganizationInfoTool()),
         memory=InMemoryConversationMemory(
             max_turns=settings.agent_memory_max_turns
         ),

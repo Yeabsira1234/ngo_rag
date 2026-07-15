@@ -7,7 +7,8 @@ and generates grounded answers with citations.
 
 The project includes a basic tool-calling agent, FastAPI HTTP API, Streamlit
 web chat, and direct RAG command-line interface. The agent is a separate layer
-that can invoke the existing RAG service as a document-search tool.
+that can choose document retrieval, fictional structured organization data,
+or a direct answer.
 
 ## Current features
 
@@ -22,7 +23,8 @@ that can invoke the existing RAG service as a document-search tool.
 - Safe CLI error handling and structured file logging
 - Streamlit chat interface with visible browser-session history
 - Versioned FastAPI question-answering endpoint and health check
-- Basic OpenAI tool-calling agent with bounded document-search iterations
+- Multi-tool OpenAI agent with bounded tool-call iterations
+- Safe fictional structured organization-information tool
 - API-key redaction in application logs
 - Unit tests that do not require OpenAI or a real Chroma database
 
@@ -51,8 +53,9 @@ Agent question
   -> AgentService
       -> InMemoryConversationMemory (complete session turns)
       -> OpenAIAgentModel (select a tool or answer directly)
-      -> DocumentSearchTool
-          -> existing RAGService
+      -> ToolRegistry
+          -> DocumentSearchTool -> existing RAGService
+          -> OrganizationInfoTool -> fictional structured sample data
   -> AgentResponse (answer, agent status, preserved document citations)
 ```
 
@@ -89,6 +92,7 @@ without agent behavior or conversation memory.
 |   |-- application.py              # Shared dependency factory
 |   |-- agent/                       # Agent models, tools, and orchestration
 |   |   `-- memory.py                # Typed process-local conversation memory
+|   |   `-- organization_data.py     # Fictional structured sample information
 |   |-- api_models.py               # Typed HTTP request/response schemas
 |   |-- chat_history.py             # Visible UI-session message models
 |   |-- documents.py                # Page and chunk document models
@@ -232,14 +236,31 @@ After ingestion, start the separate tool-calling agent:
 python agent_chat.py
 ```
 
-Unlike `chat.py`, which always performs document retrieval, the agent first
-asks the configured OpenAI model whether document search is needed. For
-document-related questions, it calls the typed `document_search` tool backed
-by the existing `RAGService`. For general questions that do not require the
-indexed document, it can answer directly. Citations from document searches are
-preserved in the final agent response.
+Unlike `chat.py`, which always performs document retrieval, the agent asks the
+configured OpenAI model to choose among:
 
-The agent currently has one read-only tool and process-local conversation
+- `document_search` for policies, procedures, and facts contained in the
+  indexed PDF. This uses the existing `RAGService` and preserves citations.
+- `organization_info` for one structured fact from a small fictional sample
+  directory. Results identify `organization_info` as their source and do not
+  have document citations.
+- A direct answer when neither tool is required.
+
+Example agent questions:
+
+```text
+What policy does the indexed document give for remote-work requests?
+What is the fictional organization's general contact email?
+Where is its main office?
+What about its service categories?
+Explain what retrieval-augmented generation means.
+```
+
+The organization data is deliberately fictional and stored separately from
+the indexed PDF. It is not USCRI, university, personal, or private
+organizational information.
+
+The agent currently has two read-only tools and process-local conversation
 memory. Follow-up questions receive retained user/assistant turns and any
 ordered tool-call context required by the Responses API. Enter `/clear` to
 remove the current session history without exiting.
@@ -397,7 +418,10 @@ requests or require the project's persistent Chroma database.
 - The relevance threshold has not been evaluated on a labeled benchmark.
 - Re-ingestion does not yet remove stale records when chunk identifiers change.
 - Visible Streamlit history is not conversational memory.
-- The agent has one document-search tool and only in-process memory.
+- The agent has only document-search and fictional organization-information
+  tools.
+- Structured organization data is static sample data, not a production system
+  of record.
 - Agent memory is not shared across processes and is not durable.
 - Agent tool selection does not yet have a labeled evaluation benchmark.
 - There is no authentication or user authorization.
@@ -409,7 +433,8 @@ requests or require the project's persistent Chroma database.
 Planned work will be introduced incrementally:
 
 1. RAG evaluation datasets, retrieval metrics, and answer-quality evaluation
-2. Additional approved agent tools
+2. Approved production tools such as read-only SQL Server queries and approved
+   organizational APIs
 3. Docker packaging
 4. Monitoring, tracing, and operational dashboards
 5. CI/CD and security controls

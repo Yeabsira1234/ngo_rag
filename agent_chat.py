@@ -76,6 +76,8 @@ def run() -> int:
 
         print("\nAnswer:")
         print(response.answer)
+        if response.tool_sources:
+            print(f"\nTools used: {', '.join(response.tool_sources)}")
         if response.citations:
             print("\nSources retrieved:")
         for index, citation in enumerate(response.citations, start=1):

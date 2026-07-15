@@ -15,8 +15,9 @@ from src.agent.models import (
     AgentResponse,
     AgentStatus,
     ToolDefinition,
+    ToolProvenance,
 )
-from src.agent.tools import AgentTool
+from src.agent.tools import AgentTool, ToolRegistry
 
 
 logger = logging.getLogger(__name__)
@@ -50,10 +51,12 @@ class AgentService:
     )
     DEPENDENCY_ERROR_MESSAGE = "The agent could not complete the request."
     INSTRUCTIONS = (
-        "You are a helpful assistant with access to an indexed-document search "
-        "tool. Use document_search for questions about the organization's indexed "
-        "document, policies, procedures, or facts. Answer directly only when "
-        "document retrieval is unnecessary. Do not invent document facts."
+        "You are a helpful assistant with two tools. Use document_search for "
+        "questions about contents, policies, procedures, or facts in the indexed "
+        "document. Use organization_info for structured facts in the fictional "
+        "sample organization directory, such as its name, support hours, contact "
+        "email, location, or service categories. Answer directly only when neither "
+        "tool is necessary. Do not invent document or organization facts."
     )
 
     def __init__(
@@ -65,14 +68,10 @@ class AgentService:
     ) -> None:
         if max_tool_iterations <= 0:
             raise ValueError("max_tool_iterations must be greater than zero.")
-        tool_map = {tool.definition.name: tool for tool in tools}
-        if len(tool_map) != len(tools):
-            raise ValueError("Agent tool names must be unique.")
-
         self.model = model
         self.memory = memory
-        self.tools = tool_map
-        self.tool_definitions = tuple(tool.definition for tool in tools)
+        self.tool_registry = ToolRegistry(tools)
+        self.tool_definitions = self.tool_registry.definitions
         self.max_tool_iterations = max_tool_iterations
 
     def answer(self, question: str) -> AgentResponse:
@@ -94,7 +93,8 @@ class AgentService:
         history_items = list(state.to_model_items())
         turn_items = [user_message.to_model_item()]
         citations: list[AgentCitation] = []
-        document_tool_used = False
+        tool_sources: list[str] = []
+        used_provenance: set[ToolProvenance] = set()
         logger.info(
             "event=agent_turn_started retained_turns=%d retained_messages=%d",
             len(state.turns),
@@ -120,16 +120,23 @@ class AgentService:
                 raise AgentDependencyError(self.DEPENDENCY_ERROR_MESSAGE) from error
 
             if not model_response.tool_calls:
-                status = (
-                    AgentStatus.DOCUMENT_ANSWER
-                    if document_tool_used
-                    else AgentStatus.DIRECT_ANSWER
-                )
+                if ToolProvenance.DOCUMENT in used_provenance:
+                    status = AgentStatus.DOCUMENT_ANSWER
+                elif (
+                    ToolProvenance.STRUCTURED_ORGANIZATION_DATA
+                    in used_provenance
+                ):
+                    status = AgentStatus.ORGANIZATION_ANSWER
+                else:
+                    status = AgentStatus.DIRECT_ANSWER
                 response = AgentResponse(
                     answer=model_response.output_text,
                     status=status,
                     citations=tuple(citations),
-                    document_tool_used=document_tool_used,
+                    document_tool_used=(
+                        ToolProvenance.DOCUMENT in used_provenance
+                    ),
+                    tool_sources=tuple(tool_sources),
                 )
                 turn_items.extend(model_response.continuation_items)
                 if not model_response.continuation_items:
@@ -168,7 +175,10 @@ class AgentService:
                     answer=self.MAX_ITERATIONS_MESSAGE,
                     status=AgentStatus.MAX_ITERATIONS,
                     citations=tuple(citations),
-                    document_tool_used=document_tool_used,
+                    document_tool_used=(
+                        ToolProvenance.DOCUMENT in used_provenance
+                    ),
+                    tool_sources=tuple(tool_sources),
                 )
 
             turn_items.extend(model_response.continuation_items)
@@ -178,13 +188,14 @@ class AgentService:
                     tool_call.name,
                     iteration + 1,
                 )
-                tool = self.tools.get(tool_call.name)
+                tool = self.tool_registry.get(tool_call.name)
                 if tool is None:
                     return self._tool_error(
                         tool_call.name,
                         "unknown_tool",
                         citations,
-                        document_tool_used,
+                        tool_sources,
+                        used_provenance,
                     )
 
                 try:
@@ -203,7 +214,8 @@ class AgentService:
                         tool_call.name,
                         "invalid_arguments",
                         citations,
-                        document_tool_used,
+                        tool_sources,
+                        used_provenance,
                     )
                 except Exception as error:
                     logger.exception(
@@ -215,13 +227,16 @@ class AgentService:
                         self.DEPENDENCY_ERROR_MESSAGE
                     ) from error
 
-                document_tool_used = (
-                    document_tool_used or tool_call.name == "document_search"
-                )
+                used_provenance.add(result.provenance)
+                if result.source not in tool_sources:
+                    tool_sources.append(result.source)
                 citations.extend(result.citations)
                 logger.info(
-                    "event=agent_tool_completed tool_name=%s citation_count=%d",
+                    "event=agent_tool_completed tool_name=%s result_status=%s "
+                    "result_category=%s citation_count=%d",
                     tool_call.name,
+                    result.status.value,
+                    result.category or "none",
                     len(result.citations),
                 )
                 turn_items.append(
@@ -248,7 +263,8 @@ class AgentService:
         tool_name: str,
         reason: str,
         citations: list[AgentCitation],
-        document_tool_used: bool,
+        tool_sources: list[str],
+        used_provenance: set[ToolProvenance],
     ) -> AgentResponse:
         logger.warning(
             "event=agent_tool_rejected tool_name=%s reason=%s",
@@ -259,5 +275,6 @@ class AgentService:
             answer=self.TOOL_ERROR_MESSAGE,
             status=AgentStatus.TOOL_ERROR,
             citations=tuple(citations),
-            document_tool_used=document_tool_used,
+            document_tool_used=(ToolProvenance.DOCUMENT in used_provenance),
+            tool_sources=tuple(tool_sources),
         )
