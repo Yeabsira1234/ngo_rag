@@ -48,6 +48,22 @@ def _render_answer_with_citation() -> None:
     )
 
 
+def _render_upload_error() -> None:
+    from streamlit_app import render_safe_upload_error
+    render_safe_upload_error(RuntimeError("C:/private/secret.pdf api-key-value"))
+
+
+def _render_agent_tool_message() -> None:
+    from src.chat_history import ChatMessage
+    from streamlit_app import render_message
+    render_message(ChatMessage(
+        role="assistant",
+        content="There are five open cases.",
+        agent_status="sql_answer",
+        tools_used=("sql_query",),
+    ))
+
+
 def test_insufficient_context_renders_as_warning() -> None:
     app = AppTest.from_function(
         _render_insufficient_context,
@@ -82,3 +98,22 @@ def test_answer_renders_compact_citation() -> None:
         "Sources",
         "sample_document.pdf · Page 2 · Chunk 4 · Distance 0.4321",
     ]
+
+
+def test_upload_failure_renders_safely_without_exception_details() -> None:
+    app = AppTest.from_function(_render_upload_error, default_timeout=10).run()
+    assert len(app.error) == 1
+    assert app.error[0].value == (
+        "The documents could not be ingested. Check the application log."
+    )
+    assert "secret.pdf" not in app.error[0].value
+    assert len(app.exception) == 0
+
+
+def test_agent_status_and_safe_tool_label_render_compactly() -> None:
+    app = AppTest.from_function(_render_agent_tool_message, default_timeout=10).run()
+    assert [caption.value for caption in app.caption] == [
+        "Tools used: Structured database",
+        "Status: sql answer",
+    ]
+    assert "SELECT" not in app.markdown[0].value

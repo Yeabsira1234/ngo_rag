@@ -1,12 +1,8 @@
 import logging
 
-from src.chunking.text_chunker import TextChunker
+from src.application import build_ingestion_service
 from src.config import Settings
-from src.discovery import PDFDocumentDiscovery
-from src.embeddings.openai_embeddings import OpenAIEmbeddingService
-from src.loaders.pdf_loader import PDFLoader
 from src.logging_config import configure_logging
-from src.vectorstore.chroma_store import ChromaVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -25,68 +21,8 @@ def run() -> int:
         )
         logger.info("event=ingestion_started")
 
-        loader = PDFLoader()
-        discovery = PDFDocumentDiscovery()
-        chunker = TextChunker(
-            chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap,
-        )
-        embedding_service = OpenAIEmbeddingService(
-            api_key=settings.openai_api_key,
-            model=settings.embedding_model,
-        )
-        vector_store = ChromaVectorStore(
-            collection_name=settings.chroma_collection_name,
-            persist_directory=str(settings.chroma_persist_directory),
-        )
-
-        discovered = discovery.discover(
+        summary = build_ingestion_service(settings).ingest_directory(
             settings.documents_directory, settings.document_glob
-        )
-        print(f"Discovered {len(discovered.documents)} PDF documents.")
-        page_documents = []
-        successful_documents = 0
-        failed_documents = 0
-        for document in discovered.documents:
-            try:
-                pages = loader.load(document)
-            except Exception as error:
-                failed_documents += 1
-                logger.error(
-                    "event=document_load_failed document_id=%s error_type=%s",
-                    document.document_id,
-                    type(error).__name__,
-                )
-                continue
-            page_documents.extend(pages)
-            successful_documents += 1
-        if not successful_documents:
-            raise RuntimeError("No discovered PDF could be processed.")
-
-        print("Creating chunks...")
-        chunks = chunker.split_documents(page_documents)
-        if not chunks:
-            raise RuntimeError("No text chunks were produced from the collection.")
-        logger.info(
-            "event=document_collection_chunked document_count=%d "
-            "failed_document_count=%d page_count=%d chunk_count=%d",
-            successful_documents,
-            failed_documents,
-            len(page_documents),
-            len(chunks),
-        )
-
-        print(f"Creating embeddings for {len(chunks)} chunks...")
-        embeddings = embedding_service.embed_documents(
-            [chunk.page_content for chunk in chunks]
-        )
-
-        stale_count = vector_store.remove_stale_documents(
-            {document.document_id for document in discovered.documents}
-        )
-        vector_store.add_documents(
-            documents=chunks,
-            embeddings=embeddings,
         )
     except Exception as error:
         sensitive_values = (
@@ -103,17 +39,18 @@ def run() -> int:
     logger.info(
         "event=ingestion_completed document_count=%d failed_document_count=%d "
         "page_count=%d chunk_count=%d stale_chunk_count=%d",
-        successful_documents,
-        failed_documents,
-        len(page_documents),
-        len(chunks),
-        stale_count,
+        summary.processed_document_count,
+        summary.failed_document_count,
+        summary.page_count,
+        summary.chunk_count,
+        summary.stale_chunk_count,
     )
     print("Ingestion complete.")
-    print(f"Successfully processed documents: {successful_documents}")
-    print(f"Skipped or failed documents: {discovered.skipped_count + failed_documents}")
-    print(f"Total pages: {len(page_documents)}")
-    print(f"Stored {len(chunks)} chunks in ChromaDB.")
+    print(f"Discovered documents: {summary.discovered_document_count}")
+    print(f"Successfully processed documents: {summary.processed_document_count}")
+    print(f"Skipped or failed documents: {summary.skipped_document_count + summary.failed_document_count}")
+    print(f"Total pages: {summary.page_count}")
+    print(f"Stored {summary.chunk_count} chunks in ChromaDB.")
     return 0
 
 

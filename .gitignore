@@ -25,6 +25,7 @@ data/**/*.pdf
 !data/samples/
 !data/samples/*.pdf
 data/private/
+data/uploads/
 
 # Editors
 .vscode/

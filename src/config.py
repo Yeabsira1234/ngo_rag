@@ -20,6 +20,9 @@ class Settings:
     llm_model: str = "gpt-4.1-mini"
     documents_directory: Path = Path("data/samples")
     document_glob: str = "*.pdf"
+    upload_directory: Path = Path("data/uploads")
+    max_upload_file_size_mb: int = 10
+    max_upload_files: int = 10
     chunk_size: int = 800
     chunk_overlap: int = 150
     chroma_collection_name: str = "ngo_documents"
@@ -48,6 +51,10 @@ class Settings:
             raise ConfigurationError("CHROMA_COLLECTION_NAME must not be empty.")
         if not self.document_glob.strip():
             raise ConfigurationError("DOCUMENT_GLOB must not be empty.")
+        if self.max_upload_file_size_mb <= 0:
+            raise ConfigurationError("MAX_UPLOAD_FILE_SIZE_MB must be greater than zero.")
+        if self.max_upload_files <= 0:
+            raise ConfigurationError("MAX_UPLOAD_FILES must be greater than zero.")
         if self.chunk_size <= 0:
             raise ConfigurationError("CHUNK_SIZE must be greater than zero.")
         if self.chunk_overlap < 0:
@@ -120,6 +127,9 @@ class Settings:
                 env.get("DOCUMENTS_DIRECTORY", "data/samples")
             ),
             document_glob=env.get("DOCUMENT_GLOB", "*.pdf"),
+            upload_directory=Path(env.get("UPLOAD_DIRECTORY", "data/uploads")),
+            max_upload_file_size_mb=_read_int(env, "MAX_UPLOAD_FILE_SIZE_MB", 10),
+            max_upload_files=_read_int(env, "MAX_UPLOAD_FILES", 10),
             chunk_size=_read_int(env, "CHUNK_SIZE", 800),
             chunk_overlap=_read_int(env, "CHUNK_OVERLAP", 150),
             chroma_collection_name=env.get(

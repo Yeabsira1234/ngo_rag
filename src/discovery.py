@@ -21,7 +21,13 @@ class DiscoveryResult:
 
 
 class PDFDocumentDiscovery:
-    def discover(self, directory: str | Path, pattern: str = "*.pdf") -> DiscoveryResult:
+    def discover(
+        self,
+        directory: str | Path,
+        pattern: str = "*.pdf",
+        *,
+        identity_namespace: str = "",
+    ) -> DiscoveryResult:
         root = Path(directory)
         if not root.is_dir():
             raise DocumentDiscoveryError("The configured documents directory is unavailable.")
@@ -44,7 +50,8 @@ class PDFDocumentDiscovery:
                 continue
             seen.add(resolved)
             relative_path = relative.as_posix()
-            identity = hashlib.sha256(relative_path.casefold().encode("utf-8")).hexdigest()[:24]
+            identity_source = f"{identity_namespace}/{relative_path}" if identity_namespace else relative_path
+            identity = hashlib.sha256(identity_source.casefold().encode("utf-8")).hexdigest()[:24]
             documents.append(DiscoveredDocument(path, relative_path, identity))
         if not documents:
             raise DocumentDiscoveryError("No valid PDF documents were found.")

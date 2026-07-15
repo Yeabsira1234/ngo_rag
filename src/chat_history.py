@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Literal
 
 from src.rag_service import RAGResponse, RAGStatus, SourceReference
+from src.agent.models import AgentResponse, AgentStatus
 
 
 SAFE_REQUEST_ERROR_MESSAGE = (
@@ -25,6 +26,8 @@ class ChatMessage:
     content: str
     kind: MessageKind = MessageKind.STANDARD
     citations: tuple[SourceReference, ...] = ()
+    agent_status: str | None = None
+    tools_used: tuple[str, ...] = ()
 
 
 def append_user_message(
@@ -59,6 +62,40 @@ def append_safe_error(messages: list[ChatMessage]) -> None:
             role="assistant",
             content=SAFE_REQUEST_ERROR_MESSAGE,
             kind=MessageKind.ERROR,
+        )
+    )
+
+
+def append_agent_response(
+    messages: list[ChatMessage], response: AgentResponse
+) -> None:
+    warning_statuses = {
+        AgentStatus.INVALID_QUESTION,
+        AgentStatus.TOOL_ERROR,
+        AgentStatus.MAX_ITERATIONS,
+    }
+    messages.append(
+        ChatMessage(
+            role="assistant",
+            content=response.answer,
+            kind=(
+                MessageKind.INSUFFICIENT_CONTEXT
+                if response.status in warning_statuses
+                else MessageKind.STANDARD
+            ),
+            citations=tuple(
+                SourceReference(
+                    source=citation.source,
+                    page_number=citation.page_number,
+                    chunk_index=citation.chunk_index,
+                    distance=citation.distance,
+                    source_relative_path=citation.source_relative_path,
+                    document_id=citation.document_id,
+                )
+                for citation in response.citations
+            ),
+            agent_status=response.status.value,
+            tools_used=response.tool_sources,
         )
     )
 

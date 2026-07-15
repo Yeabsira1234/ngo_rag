@@ -10,6 +10,10 @@ from src.llm.openai_llm import OpenAILLMService
 from src.prompting import RAGPromptBuilder
 from src.rag_service import RAGService
 from src.vectorstore.chroma_store import ChromaVectorStore
+from src.chunking.text_chunker import TextChunker
+from src.discovery import PDFDocumentDiscovery
+from src.ingestion import CollectionIngestionService
+from src.loaders.pdf_loader import PDFLoader
 from src.sql.connection import build_connection_factory
 from src.sql.repository import SQLServerRepository
 
@@ -38,6 +42,20 @@ def build_rag_service(settings: Settings) -> RAGService:
     )
 
 
+def build_ingestion_service(settings: Settings) -> CollectionIngestionService:
+    """Construct the reusable PDF collection ingestion workflow."""
+    return CollectionIngestionService(
+        discovery=PDFDocumentDiscovery(),
+        loader=PDFLoader(),
+        chunker=TextChunker(settings.chunk_size, settings.chunk_overlap),
+        embedding_service=OpenAIEmbeddingService(
+            api_key=settings.openai_api_key, model=settings.embedding_model
+        ),
+        vector_store=ChromaVectorStore(
+            collection_name=settings.chroma_collection_name,
+            persist_directory=str(settings.chroma_persist_directory),
+        ),
+    )
 def build_agent_service(settings: Settings) -> AgentService:
     """Construct the agent and register its injected application tools."""
     rag_service = build_rag_service(settings)

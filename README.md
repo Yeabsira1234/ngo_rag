@@ -21,7 +21,7 @@ or a direct answer.
 - Typed retrieval and RAG response models
 - Centralized prompt construction and RAG orchestration
 - Safe CLI error handling and structured file logging
-- Streamlit chat interface with visible browser-session history
+- Streamlit agent chat with isolated in-session conversation memory
 - Versioned FastAPI question-answering endpoint and health check
 - Multi-tool OpenAI agent with bounded tool-call iterations
 - Safe fictional structured organization-information tool
@@ -40,8 +40,8 @@ Configured PDF directory
   -> OpenAIEmbeddingService
   -> ChromaVectorStore
 
-Question
-  -> api.py, streamlit_app.py, or chat.py
+Direct RAG question
+  -> api.py or chat.py
   -> RAGService
       -> OpenAIEmbeddingService
       -> ChromaVectorStore (typed results + distance filtering)
@@ -50,24 +50,25 @@ Question
   -> RAGResponse (answer, status, citations, LLM-called flag)
 
 Agent question
-  -> agent_chat.py
+  -> agent_chat.py or streamlit_app.py
   -> AgentService
       -> InMemoryConversationMemory (complete session turns)
       -> OpenAIAgentModel (select a tool or answer directly)
       -> ToolRegistry
           -> DocumentSearchTool -> existing RAGService
           -> OrganizationInfoTool -> fictional structured sample data
+          -> SQLQueryTool -> predefined read-only SQL operations
   -> AgentResponse (answer, agent status, preserved document citations)
 ```
 
 `api.py`, `streamlit_app.py`, and `chat.py` are intentionally thin boundary
-layers. They use the same application factory and do not contain retrieval,
-relevance-filtering, or prompt-building logic.
+layers. They use application factories and do not contain retrieval,
+relevance-filtering, prompt-building, tool-routing, or memory logic.
 
-`AgentService` does not replace `RAGService`. It owns only model-directed tool
-selection, safe tool dispatch, and the bounded tool-call loop. The direct CLI,
-Streamlit interface, and FastAPI endpoint continue to call `RAGService`
-without agent behavior or conversation memory.
+`AgentService` does not replace `RAGService`. It owns model-directed tool
+selection, safe tool dispatch, bounded tool calls, and conversation memory.
+Streamlit and `agent_chat.py` use `AgentService`; the direct `chat.py` CLI and
+FastAPI endpoint continue to use `RAGService` without agent behavior.
 
 ## Repository structure
 
@@ -232,13 +233,11 @@ filenames in different folders. Chunk indices restart at zero for each document.
 Chroma IDs combine `document_id`, page number, and chunk index.
 
 Ingestion uses deterministic Chroma upserts, so running it repeatedly does not
-duplicate unchanged chunks. It also removes vectors whose document IDs are no
-longer present in the discovered collection. If a still-present PDF fails to
-load, its old vectors are retained so a transient read failure does not erase
-previously usable data. Changing a file's contents without changing its path
-reuses record IDs; if the new version produces fewer chunks, surplus old chunks
-for that same document are not yet removed and require rebuilding the local
-Chroma directory.
+duplicate unchanged chunks. Collection-wide stale deletion is disabled because
+CLI and browser ingestion manage different directories and must not delete one
+another's vectors. Changing a file's contents without changing its path reuses
+record IDs; if the new version produces fewer chunks, surplus old chunks for
+that same document require rebuilding the local Chroma directory.
 
 If the stored schema, chunking configuration, embedding model, or source
 document changes, rebuild the generated Chroma data before evaluating retrieval.
@@ -287,7 +286,7 @@ The organization data is deliberately fictional and stored separately from
 the indexed PDF. It is not USCRI, university, personal, or private
 organizational information.
 
-The agent currently has two read-only tools and process-local conversation
+The agent currently has three read-only tools and process-local conversation
 memory. Follow-up questions receive retained user/assistant turns and any
 ordered tool-call context required by the Responses API. Enter `/clear` to
 remove the current session history without exiting.
@@ -300,9 +299,9 @@ memory store. A future deployment can replace the small memory-store interface
 with Redis or a database without moving state into `RAGService`.
 
 Unknown tools and malformed arguments are rejected, and
-`AGENT_MAX_TOOL_ITERATIONS` prevents an infinite tool loop. The direct RAG CLI,
-Streamlit UI, and FastAPI API remain stateless; memory is enabled only for
-`agent_chat.py` in this step.
+`AGENT_MAX_TOOL_ITERATIONS` prevents an infinite tool loop. The direct RAG CLI
+and FastAPI API remain stateless. Memory is enabled for `agent_chat.py` and
+independently for each Streamlit browser session.
 
 ## Running the Streamlit app
 
@@ -313,14 +312,57 @@ web interface from the repository root:
 python -m streamlit run streamlit_app.py
 ```
 
-Open the local URL printed by Streamlit. The interface displays answers and
-compact source citations, shows the active document and retrieval configuration
-in the sidebar, and provides a button to clear visible chat history.
+Open the local URL printed by Streamlit. The web chat uses `AgentService`, so it
+supports document search, fictional organization information, predefined
+read-only SQL queries, direct answers, and contextual follow-up questions.
+Assistant messages display compact status, safe tool labels, and document
+citations without exposing tool payloads, SQL, or provider internals.
 
-Streamlit session state preserves messages only so the page can redraw them
-during the current browser session. This is not semantic conversation memory:
-previous messages are not sent to `RAGService` or the LLM, and each question is
-answered independently.
+Each browser session owns a separate agent and in-memory conversation store in
+`st.session_state`. Reruns preserve that session's context, while different
+browser sessions do not share memory. **Clear chat history** clears both visible
+messages and underlying agent memory. Memory remains non-persistent and is lost
+when the browser session or application process ends.
+
+### Browser PDF ingestion
+
+The document-management section accepts up to `MAX_UPLOAD_FILES` PDF files per
+batch, with each file limited to `MAX_UPLOAD_FILE_SIZE_MB`. Selection alone does
+not ingest anything; press **Upload and ingest documents** explicitly. Files are
+validated as readable PDFs before any member of the batch is saved.
+
+Uploads are stored under `UPLOAD_DIRECTORY` (`data/uploads` by default), which
+is ignored by Git. Filenames must be simple visible PDF names without path
+components or suspicious characters. Temporary files are atomically moved into
+place only after the whole batch passes validation and are cleaned afterward.
+The UI never displays extracted text, embeddings, credentials, stack traces, or
+absolute local paths.
+
+Existing filenames are never silently replaced. Re-uploading byte-identical
+content is treated as unchanged and skips ingestion; different content under an
+existing filename is rejected. Browser uploads use a separate identity namespace
+so a sample/private PDF with the same relative filename cannot collide. Upload
+ingestion uses the same discovery, loading, chunking, embedding, and Chroma
+services as `ingest.py`, and successful documents are immediately available to
+chat. A process-local lock prevents overlapping browser ingestion runs.
+
+```env
+UPLOAD_DIRECTORY=data/uploads
+MAX_UPLOAD_FILE_SIZE_MB=10
+MAX_UPLOAD_FILES=10
+```
+
+Because CLI and browser ingestion can manage different directories, Step 15
+does not perform collection-wide stale-vector deletion during ingestion; doing
+so could delete unrelated vectors from another source. Browser replacement is
+rejected, so it cannot leave stale chunks for an existing upload. Production
+storage, coordinated cleanup, authentication, and asynchronous ingestion are
+deferred to the later LLMOps phase.
+
+Visible Streamlit messages remain separate from internal agent context and hold
+only redraw data. Upload ingestion updates the same Chroma collection used by
+the session agent, so new documents are searchable immediately without
+recreating conversation memory.
 
 ## Running the FastAPI service
 
@@ -471,12 +513,13 @@ natural-language-to-SQL is intentionally deferred to a later step.
 
 ## Known limitations
 
-- Browser document upload is not available yet; it is planned for Step 15.
+- Browser uploads use process-local storage and concurrency control; they are
+  not suitable for horizontally scaled deployment yet.
 - Chunking is character-based rather than token-, sentence-, or section-aware.
 - Image-only PDFs require OCR, which is not currently implemented.
 - The relevance threshold has not been evaluated on a labeled benchmark.
 - Re-ingestion does not yet remove stale records when chunk identifiers change.
-- Visible Streamlit history is not conversational memory.
+- Streamlit agent memory is isolated per browser session but is not durable.
 - The agent has document-search, fictional organization-information, and
   predefined read-only SQL tools only.
 - Structured organization data is static sample data, not a production system

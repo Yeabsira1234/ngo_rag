@@ -12,6 +12,9 @@ def test_settings_use_current_application_defaults() -> None:
     assert settings.llm_model == "gpt-4.1-mini"
     assert settings.documents_directory == Path("data/samples")
     assert settings.document_glob == "*.pdf"
+    assert settings.upload_directory == Path("data/uploads")
+    assert settings.max_upload_file_size_mb == 10
+    assert settings.max_upload_files == 10
     assert settings.chunk_size == 800
     assert settings.chunk_overlap == 150
     assert settings.chroma_collection_name == "ngo_documents"
