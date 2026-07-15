@@ -1,3 +1,8 @@
+from openai import OpenAI
+
+from src.agent.openai_model import OpenAIAgentModel
+from src.agent.service import AgentService
+from src.agent.tools import DocumentSearchTool
 from src.config import Settings
 from src.embeddings.openai_embeddings import OpenAIEmbeddingService
 from src.llm.openai_llm import OpenAILLMService
@@ -27,4 +32,19 @@ def build_rag_service(settings: Settings) -> RAGService:
         prompt_builder=RAGPromptBuilder(),
         retrieval_result_count=settings.retrieval_result_count,
         retrieval_max_distance=settings.retrieval_max_distance,
+    )
+
+
+def build_agent_service(settings: Settings) -> AgentService:
+    """Construct the agent with the existing RAG service as its only tool."""
+    rag_service = build_rag_service(settings)
+    openai_client = OpenAI(api_key=settings.openai_api_key)
+    model = OpenAIAgentModel(
+        client=openai_client.responses,
+        model=settings.llm_model,
+    )
+    return AgentService(
+        model=model,
+        tools=(DocumentSearchTool(rag_service),),
+        max_tool_iterations=settings.agent_max_tool_iterations,
     )

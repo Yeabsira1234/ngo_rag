@@ -48,3 +48,38 @@ def test_build_rag_service_constructs_expected_dependencies(
         retrieval_result_count=settings.retrieval_result_count,
         retrieval_max_distance=settings.retrieval_max_distance,
     )
+
+
+def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> None:
+    settings = Settings(openai_api_key="test-key")
+    rag_service = object()
+    responses_client = object()
+    openai_instance = Mock(responses=responses_client)
+    model = object()
+    document_tool = object()
+    agent_service = object()
+
+    monkeypatch.setattr(application, "build_rag_service", Mock(return_value=rag_service))
+    openai_class = Mock(return_value=openai_instance)
+    model_class = Mock(return_value=model)
+    tool_class = Mock(return_value=document_tool)
+    agent_class = Mock(return_value=agent_service)
+    monkeypatch.setattr(application, "OpenAI", openai_class)
+    monkeypatch.setattr(application, "OpenAIAgentModel", model_class)
+    monkeypatch.setattr(application, "DocumentSearchTool", tool_class)
+    monkeypatch.setattr(application, "AgentService", agent_class)
+
+    result = application.build_agent_service(settings)
+
+    assert result is agent_service
+    openai_class.assert_called_once_with(api_key="test-key")
+    model_class.assert_called_once_with(
+        client=responses_client,
+        model=settings.llm_model,
+    )
+    tool_class.assert_called_once_with(rag_service)
+    agent_class.assert_called_once_with(
+        model=model,
+        tools=(document_tool,),
+        max_tool_iterations=settings.agent_max_tool_iterations,
+    )

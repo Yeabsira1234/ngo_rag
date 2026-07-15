@@ -5,9 +5,9 @@ answering questions from PDF documents. The project extracts page-aware text,
 creates OpenAI embeddings, stores them in ChromaDB, retrieves relevant chunks,
 and generates grounded answers with citations.
 
-The project includes a FastAPI HTTP API, Streamlit web chat, and command-line
-interface. All three call the same RAG service, keeping retrieval and
-answer-generation logic out of the transport and presentation layers.
+The project includes a basic tool-calling agent, FastAPI HTTP API, Streamlit
+web chat, and direct RAG command-line interface. The agent is a separate layer
+that can invoke the existing RAG service as a document-search tool.
 
 ## Current features
 
@@ -22,6 +22,7 @@ answer-generation logic out of the transport and presentation layers.
 - Safe CLI error handling and structured file logging
 - Streamlit chat interface with visible browser-session history
 - Versioned FastAPI question-answering endpoint and health check
+- Basic OpenAI tool-calling agent with bounded document-search iterations
 - API-key redaction in application logs
 - Unit tests that do not require OpenAI or a real Chroma database
 
@@ -44,17 +45,31 @@ Question
       -> RAGPromptBuilder
       -> OpenAILLMService
   -> RAGResponse (answer, status, citations, LLM-called flag)
+
+Agent question
+  -> agent_chat.py
+  -> AgentService
+      -> OpenAIAgentModel (select a tool or answer directly)
+      -> DocumentSearchTool
+          -> existing RAGService
+  -> AgentResponse (answer, agent status, preserved document citations)
 ```
 
 `api.py`, `streamlit_app.py`, and `chat.py` are intentionally thin boundary
 layers. They use the same application factory and do not contain retrieval,
 relevance-filtering, or prompt-building logic.
 
+`AgentService` does not replace `RAGService`. It owns only model-directed tool
+selection, safe tool dispatch, and the bounded tool-call loop. The direct CLI,
+Streamlit interface, and FastAPI endpoint continue to call `RAGService`
+without agent behavior.
+
 ## Repository structure
 
 ```text
 .
 |-- chat.py                         # Interactive chat CLI
+|-- agent_chat.py                   # Tool-calling agent CLI
 |-- api.py                          # FastAPI HTTP entry point
 |-- streamlit_app.py               # Streamlit web chat
 |-- ingest.py                       # PDF ingestion CLI
@@ -71,6 +86,7 @@ relevance-filtering, or prompt-building logic.
 |   |-- vectorstore/chroma_store.py
 |   |-- config.py                   # Typed environment settings
 |   |-- application.py              # Shared dependency factory
+|   |-- agent/                       # Agent models, tools, and orchestration
 |   |-- api_models.py               # Typed HTTP request/response schemas
 |   |-- chat_history.py             # Visible UI-session message models
 |   |-- documents.py                # Page and chunk document models
@@ -151,6 +167,7 @@ The available settings are:
 | `CHROMA_PERSIST_DIRECTORY` | Local Chroma data directory | `chroma_data` |
 | `RETRIEVAL_RESULT_COUNT` | Maximum candidates requested | `4` |
 | `RETRIEVAL_MAX_DISTANCE` | Maximum accepted L2 distance | `0.9` |
+| `AGENT_MAX_TOOL_ITERATIONS` | Maximum agent tool-call rounds | `2` |
 
 `.env` is ignored by Git. Never commit API keys or other credentials.
 
@@ -203,6 +220,25 @@ python chat.py
 
 Enter a document-related question. Use `exit` or `quit` to stop the application.
 The CLI calls `RAGService`; `rag_service.py` is not a standalone executable.
+
+## Running the agent CLI
+
+After ingestion, start the separate tool-calling agent:
+
+```bash
+python agent_chat.py
+```
+
+Unlike `chat.py`, which always performs document retrieval, the agent first
+asks the configured OpenAI model whether document search is needed. For
+document-related questions, it calls the typed `document_search` tool backed
+by the existing `RAGService`. For general questions that do not require the
+indexed document, it can answer directly. Citations from document searches are
+preserved in the final agent response.
+
+The agent currently has one read-only tool and no conversation memory. Each
+question is independent. Unknown tools and malformed arguments are rejected,
+and `AGENT_MAX_TOOL_ITERATIONS` prevents an infinite tool loop.
 
 ## Running the Streamlit app
 
@@ -345,6 +381,8 @@ requests or require the project's persistent Chroma database.
 - The relevance threshold has not been evaluated on a labeled benchmark.
 - Re-ingestion does not yet remove stale records when chunk identifiers change.
 - Visible Streamlit history is not conversational memory.
+- The agent has one document-search tool and no conversational memory.
+- Agent tool selection does not yet have a labeled evaluation benchmark.
 - There is no authentication or user authorization.
 - OpenAI and local Chroma failures are logged but are not retried.
 - There is no automated RAG evaluation or production monitoring yet.
@@ -354,7 +392,7 @@ requests or require the project's persistent Chroma database.
 Planned work will be introduced incrementally:
 
 1. RAG evaluation datasets, retrieval metrics, and answer-quality evaluation
-2. Agent capabilities and approved tool calling
+2. Agent conversation memory and additional approved tools
 3. Docker packaging
 4. Monitoring, tracing, and operational dashboards
 5. CI/CD and security controls
