@@ -26,6 +26,7 @@ def test_settings_use_current_application_defaults() -> None:
     assert settings.agent_memory_max_turns == 10
     assert settings.external_api_timeout_seconds == 5.0
     assert settings.external_api_max_retries == 2
+    assert settings.mcp_max_input_length == 2_000
     assert settings.sql_server == "YEABSIRA"
     assert settings.sql_database == "NGO_RAG"
     assert settings.sql_query_timeout_seconds == 10
@@ -52,6 +53,7 @@ def test_settings_read_environment_overrides() -> None:
             "AGENT_MEMORY_MAX_TURNS": "7",
             "EXTERNAL_API_TIMEOUT_SECONDS": "7.5",
             "EXTERNAL_API_MAX_RETRIES": "4",
+            "MCP_MAX_INPUT_LENGTH": "1500",
             "LOG_LEVEL": "debug",
         }
     )
@@ -72,6 +74,7 @@ def test_settings_read_environment_overrides() -> None:
     assert settings.agent_memory_max_turns == 7
     assert settings.external_api_timeout_seconds == 7.5
     assert settings.external_api_max_retries == 4
+    assert settings.mcp_max_input_length == 1_500
     assert settings.log_level == "DEBUG"
 
 
@@ -168,3 +171,11 @@ def test_settings_reject_invalid_agent_tool_call_limit() -> None:
 def test_settings_reject_invalid_external_api_limits(name: str, value: str) -> None:
     with pytest.raises(ConfigurationError, match=name):
         Settings.from_env({"OPENAI_API_KEY": "test-key", name: value})
+
+
+@pytest.mark.parametrize("value", ["0", "10001"])
+def test_settings_reject_invalid_mcp_input_limit(value: str) -> None:
+    with pytest.raises(ConfigurationError, match="MCP_MAX_INPUT_LENGTH"):
+        Settings.from_env(
+            {"OPENAI_API_KEY": "test-key", "MCP_MAX_INPUT_LENGTH": value}
+        )

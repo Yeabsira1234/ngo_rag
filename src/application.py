@@ -4,6 +4,7 @@ from src.agent.openai_model import OpenAIAgentModel
 from src.agent.memory import InMemoryConversationMemory
 from src.agent.service import AgentService
 from src.agent.tools import (
+    AgentTool,
     DocumentSearchTool,
     OrganizationInfoTool,
     SQLQueryTool,
@@ -66,14 +67,15 @@ def build_ingestion_service(settings: Settings) -> CollectionIngestionService:
             persist_directory=str(settings.chroma_persist_directory),
         ),
     )
-def build_agent_service(settings: Settings) -> AgentService:
-    """Construct the agent and register its injected application tools."""
+
+
+def build_application_tools(
+    settings: Settings,
+    openai_client: OpenAI | None = None,
+) -> tuple[AgentTool, ...]:
+    """Construct the four reusable read-only application tool boundaries."""
     rag_service = build_rag_service(settings)
-    openai_client = OpenAI(api_key=settings.openai_api_key)
-    model = OpenAIAgentModel(
-        client=openai_client.responses,
-        model=settings.llm_model,
-    )
+    client = openai_client or OpenAI(api_key=settings.openai_api_key)
     sql_repository = SQLServerRepository(
         build_connection_factory(settings),
         timeout_seconds=settings.sql_query_timeout_seconds,
@@ -81,7 +83,7 @@ def build_agent_service(settings: Settings) -> AgentService:
     )
     natural_language_sql = NaturalLanguageSQLService(
         generator=OpenAISQLGenerator(
-            client=openai_client.responses,
+            client=client.responses,
             model=settings.llm_model,
             schema=APPROVED_SCHEMA,
             max_rows=settings.sql_max_rows,
@@ -93,17 +95,24 @@ def build_agent_service(settings: Settings) -> AgentService:
         timeout_seconds=settings.external_api_timeout_seconds,
         max_retries=settings.external_api_max_retries,
     )
+    return (
+        DocumentSearchTool(rag_service),
+        OrganizationInfoTool(),
+        SQLQueryTool(sql_repository, natural_language_sql),
+        WeatherInformationTool(weather_client),
+    )
+
+
+def build_agent_service(settings: Settings) -> AgentService:
+    """Construct the agent and register its injected application tools."""
+    openai_client = OpenAI(api_key=settings.openai_api_key)
+    model = OpenAIAgentModel(
+        client=openai_client.responses,
+        model=settings.llm_model,
+    )
     return AgentService(
         model=model,
-        tools=(
-            DocumentSearchTool(rag_service),
-            OrganizationInfoTool(),
-            SQLQueryTool(
-                sql_repository,
-                natural_language_sql,
-            ),
-            WeatherInformationTool(weather_client),
-        ),
+        tools=build_application_tools(settings, openai_client),
         memory=InMemoryConversationMemory(
             max_turns=settings.agent_memory_max_turns
         ),

@@ -26,6 +26,7 @@ or a direct answer.
 - Planned cross-tool OpenAI agent with bounded calls and partial completion
 - Safe fictional structured organization-information tool
 - Live read-only weather tool backed by approved Open-Meteo endpoints
+- Local stdio MCP server exposing the four existing read-only capabilities
 - API-key redaction in application logs
 - Unit tests that do not require OpenAI or a real Chroma database
 
@@ -66,6 +67,13 @@ Agent question
           -> SQLQueryTool -> predefined read-only SQL operations
           -> WeatherInformationTool -> OpenMeteoClient -> approved GET endpoints
   -> AgentResponse (answer, agent status, preserved document citations)
+
+MCP client
+  -> mcp_server.py (official MCP SDK, stdio transport)
+  -> src/mcp/server.py (typed tool registration only)
+  -> MCPAdapters (validation, safe structured serialization, metadata logging)
+  -> existing DocumentSearchTool, OrganizationInfoTool, SQLQueryTool,
+     and WeatherInformationTool
 ```
 
 `api.py`, `streamlit_app.py`, and `chat.py` are intentionally thin boundary
@@ -175,12 +183,90 @@ attributed to the external service. Weather currently supports city geocoding,
 current conditions, and today's forecast only; it does not provide historical,
 multi-day, alert, air-quality, or caller-supplied coordinate queries.
 
+### Local Model Context Protocol server
+
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) standardizes
+how an MCP client discovers and invokes application tools. This project adds MCP
+as a second, local interface for learning and interoperability; it does not
+replace LangGraph, `AgentService`, the CLIs, Streamlit, FastAPI, or ingestion.
+
+```text
+MCP client
+    |
+    v
+Official FastMCP server (stdio)
+    |
+    v
+Thin typed adapters
+    |
+    +-- existing RAG service
+    +-- existing organization-information tool
+    +-- existing SQL tool and NL-to-SQL safety boundary
+    `-- existing fixed-endpoint Open-Meteo client/tool
+```
+
+`mcp_server.py` is the executable boundary. `src/mcp/server.py` declares the
+official SDK tools and their generated input/output schemas; `adapters.py` maps
+existing application results without duplicating retrieval, SQL, weather, or
+organization logic; `schemas.py` contains structured outputs; and `utilities.py`
+keeps protocol stdout clean while logging safe metadata to stderr and
+`logs/application.log`.
+
+The server exposes tools only:
+
+| MCP tool | Existing capability | Output |
+|---|---|---|
+| `search_documents` | Relevance-filtered `RAGService` | Answer, status, full document citations |
+| `organization_information` | Fictional organization-information tool | Answer, category, status, source |
+| `sql_information` | Predefined SQL or validated NL-to-SQL | Safe bounded data, operation, status |
+| `weather_information` | Allowlisted Open-Meteo client | Typed current and same-day weather |
+
+All four tools carry MCP read-only and non-destructive annotations. Inputs are
+typed, documented, schema validated, and additionally bounded by
+`MCP_MAX_INPUT_LENGTH`. There are no MCP operations for writes, uploads,
+ingestion, deletion, filesystem access, arbitrary URLs, arbitrary coordinates,
+or arbitrary SQL. SQL output never contains generated SQL, connection strings,
+or credentials. Existing SQL privacy, validation, timeout, and row limits and
+existing weather endpoint, retry, TLS, and timeout controls remain authoritative.
+
+Install dependencies, then run the server for an MCP client from the repository
+root:
+
+```powershell
+.venv\Scripts\python.exe mcp_server.py
+```
+
+Because stdio carries MCP protocol frames, do not type into or redirect ordinary
+application output through that process. Operational logs go to stderr and the
+application log; logged fields are limited to tool name, duration, status, and
+failure category.
+
+To inspect this exact local server on Windows from the repository root, install
+Node.js as required by MCP Inspector and run:
+
+```powershell
+npx -y @modelcontextprotocol/inspector .venv\Scripts\python.exe mcp_server.py
+```
+
+Inspector opens its UI and starts this project as a stdio child process. Use the
+Tools tab to list and call `search_documents`, `organization_information`,
+`sql_information`, and `weather_information`. The server reads the same local
+configuration as the existing entry points; no separate MCP credential file is
+used.
+
+This step intentionally provides local stdio tools only. It does not implement
+MCP resources, prompts, apps, sampling, remote servers, Streamable HTTP, SSE,
+OAuth, persistent sessions, or remote deployment. A future step may add a remote
+MCP transport and authentication after its trust boundary is designed; the thin
+adapters can remain unchanged.
+
 ## Repository structure
 
 ```text
 .
 |-- chat.py                         # Interactive chat CLI
 |-- agent_chat.py                   # Tool-calling agent CLI
+|-- mcp_server.py                   # Local read-only stdio MCP entry point
 |-- api.py                          # FastAPI HTTP entry point
 |-- streamlit_app.py               # Streamlit web chat
 |-- ingest.py                       # PDF ingestion CLI
@@ -199,6 +285,7 @@ multi-day, alert, air-quality, or caller-supplied coordinate queries.
 |   |-- application.py              # Shared dependency factory
 |   |-- agent/                       # Agent models, tools, and orchestration
 |   |-- external_api/                # Approved typed Open-Meteo HTTP boundary
+|   |-- mcp/                         # MCP server, adapters, schemas, utilities
 |   |   `-- memory.py                # Typed process-local conversation memory
 |   |   `-- organization_data.py     # Fictional structured sample information
 |   |-- api_models.py               # Typed HTTP request/response schemas
@@ -287,6 +374,7 @@ The available settings are:
 | `AGENT_MEMORY_MAX_TURNS` | Complete agent turns retained in memory | `10` |
 | `EXTERNAL_API_TIMEOUT_SECONDS` | Per-request weather API timeout | `5` |
 | `EXTERNAL_API_MAX_RETRIES` | Transient weather retries after the initial call | `2` |
+| `MCP_MAX_INPUT_LENGTH` | Maximum accepted MCP text input | `2000` |
 
 The old `DOCUMENT_PATH` setting was removed rather than deprecated: ingestion
 now always targets one explicitly configured directory and glob, avoiding two
@@ -686,6 +774,8 @@ predefined operations remain available as the preferred fallback when they fit.
   of record.
 - Live weather depends on Open-Meteo availability and supports only city-based
   current conditions and today's forecast.
+- MCP is local stdio only and exposes tools only; remote transport,
+  authentication, resources, prompts, and persistent sessions are not included.
 - Agent memory is not shared across processes and is not durable.
 - Agent tool selection does not yet have a labeled evaluation benchmark.
 - There is no authentication or user authorization.

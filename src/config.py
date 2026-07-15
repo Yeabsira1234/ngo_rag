@@ -34,6 +34,7 @@ class Settings:
     agent_memory_max_turns: int = 10
     external_api_timeout_seconds: float = 5.0
     external_api_max_retries: int = 2
+    mcp_max_input_length: int = 2_000
     sql_server: str = "YEABSIRA"
     sql_database: str = "NGO_RAG"
     sql_driver: str = "ODBC Driver 18 for SQL Server"
@@ -99,6 +100,10 @@ class Settings:
         if self.external_api_max_retries < 0:
             raise ConfigurationError(
                 "EXTERNAL_API_MAX_RETRIES cannot be negative."
+            )
+        if not 1 <= self.mcp_max_input_length <= 10_000:
+            raise ConfigurationError(
+                "MCP_MAX_INPUT_LENGTH must be between 1 and 10000."
             )
         if not self.sql_server.strip() or not self.sql_database.strip():
             raise ConfigurationError("SQL_SERVER and SQL_DATABASE must not be empty.")
@@ -177,6 +182,7 @@ class Settings:
             external_api_max_retries=_read_int(
                 env, "EXTERNAL_API_MAX_RETRIES", 2
             ),
+            mcp_max_input_length=_read_int(env, "MCP_MAX_INPUT_LENGTH", 2_000),
             sql_server=env.get("SQL_SERVER", "YEABSIRA"),
             sql_database=env.get("SQL_DATABASE", "NGO_RAG"),
             sql_driver=env.get("SQL_DRIVER", "ODBC Driver 18 for SQL Server"),
