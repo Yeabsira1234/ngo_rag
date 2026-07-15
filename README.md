@@ -25,6 +25,7 @@ or a direct answer.
 - Versioned FastAPI question-answering endpoint and health check
 - Planned cross-tool OpenAI agent with bounded calls and partial completion
 - Safe fictional structured organization-information tool
+- Live read-only weather tool backed by approved Open-Meteo endpoints
 - API-key redaction in application logs
 - Unit tests that do not require OpenAI or a real Chroma database
 
@@ -63,6 +64,7 @@ Agent question
           -> DocumentSearchTool -> existing RAGService
           -> OrganizationInfoTool -> fictional structured sample data
           -> SQLQueryTool -> predefined read-only SQL operations
+          -> WeatherInformationTool -> OpenMeteoClient -> approved GET endpoints
   -> AgentResponse (answer, agent status, preserved document citations)
 ```
 
@@ -116,8 +118,8 @@ node callables and are not stored in graph state. Existing
 checkpointers are not enabled. Only a successfully finalized response reaches
 `commit_memory`.
 
-The graph preserves the document, organization, predefined SQL, and safe
-natural-language SQL tools. It canonicalizes call arguments to stop equivalent
+The graph preserves the document, organization, predefined SQL, safe
+natural-language SQL, and live weather tools. It canonicalizes call arguments to stop equivalent
 repeated calls, permits at most one natural-language SQL operation per turn,
 and retains the configured maximum tool-iteration boundary. Persistent
 checkpointers and human approval nodes are deferred to later persistence and
@@ -130,7 +132,7 @@ execution. `AGENT_MAX_TOOL_CALLS_PER_TURN` defaults to 3 and is independent of
 `AGENT_MAX_TOOL_ITERATIONS`; unknown, duplicate, or oversized plans stop safely.
 Plans, arguments, generated SQL, and model reasoning are never shown to users.
 
-Tool results remain typed and separated as document, SQL, or organization
+Tool results remain typed and separated as document, SQL, organization, or external API
 evidence through a dedicated synthesis node. Document citations retain filename,
 relative document identity, page, chunk, and distance. Synthesis is instructed
 to distinguish database facts from document guidance and organization-directory
@@ -141,11 +143,37 @@ conversation memory. A successful combined turn is committed exactly once with
 the ordered Responses API items, so follow-up questions can use the combined
 context.
 
-Supported combinations are document plus SQL, organization information plus
-SQL, and document plus organization information, up to the configured call cap.
+Supported combinations include document, SQL, organization information, and
+weather evidence, up to the configured call cap.
 Planning is single-agent and bounded: it does not retry failed tools, run calls
-in parallel, access external APIs, infer unsupported relationships, or bypass
+in parallel, infer unsupported relationships, or bypass
 the existing RAG relevance and SQL validation boundaries.
+
+### External weather API
+
+`src/external_api/` is the only HTTP boundary for live weather. Its typed
+`OpenMeteoClient` first resolves a validated city through the fixed Open-Meteo
+geocoding endpoint, then requests current conditions and today's bounded forecast
+from the fixed forecast endpoint. `WeatherReport` validates the JSON shape before
+`WeatherInformationTool` exposes labeled evidence to the existing planner.
+
+Only HTTPS `GET` calls to those two constants are permitted. Callers cannot pass
+a URL, host, arbitrary coordinates, headers, or HTTP method; malformed city names
+are rejected before I/O. Normal TLS certificate verification remains enabled.
+The client sends a project user-agent, applies `EXTERNAL_API_TIMEOUT_SECONDS` to
+each request, and retries only network/timeouts, HTTP 429, and 5xx responses up to
+`EXTERNAL_API_MAX_RETRIES`. Other 4xx responses and invalid JSON fail immediately.
+User-facing failures are safe, while logs contain only endpoint name, status,
+latency, and outcome. They never contain cities, URLs, parameters, or response
+bodies.
+
+The model is instructed to use `weather_information` only for live current or
+same-day city weather. General knowledge, historical weather, document, SQL, and
+organization questions retain their existing routes. Cross-source plans can
+combine weather with any existing tool and the synthesis node keeps live weather
+attributed to the external service. Weather currently supports city geocoding,
+current conditions, and today's forecast only; it does not provide historical,
+multi-day, alert, air-quality, or caller-supplied coordinate queries.
 
 ## Repository structure
 
@@ -170,6 +198,7 @@ the existing RAG relevance and SQL validation boundaries.
 |   |-- config.py                   # Typed environment settings
 |   |-- application.py              # Shared dependency factory
 |   |-- agent/                       # Agent models, tools, and orchestration
+|   |-- external_api/                # Approved typed Open-Meteo HTTP boundary
 |   |   `-- memory.py                # Typed process-local conversation memory
 |   |   `-- organization_data.py     # Fictional structured sample information
 |   |-- api_models.py               # Typed HTTP request/response schemas
@@ -254,7 +283,10 @@ The available settings are:
 | `RETRIEVAL_RESULT_COUNT` | Maximum candidates requested | `4` |
 | `RETRIEVAL_MAX_DISTANCE` | Maximum accepted L2 distance | `0.9` |
 | `AGENT_MAX_TOOL_ITERATIONS` | Maximum agent tool-call rounds | `2` |
+| `AGENT_MAX_TOOL_CALLS_PER_TURN` | Maximum ordered tools in one turn | `3` |
 | `AGENT_MEMORY_MAX_TURNS` | Complete agent turns retained in memory | `10` |
+| `EXTERNAL_API_TIMEOUT_SECONDS` | Per-request weather API timeout | `5` |
+| `EXTERNAL_API_MAX_RETRIES` | Transient weather retries after the initial call | `2` |
 
 The old `DOCUMENT_PATH` setting was removed rather than deprecated: ingestion
 now always targets one explicitly configured directory and glob, avoiding two
@@ -349,6 +381,8 @@ configured OpenAI model to choose among:
   have document citations.
 - `sql_query` for predefined read-only database operations or validated,
   bounded natural-language SQL when an exact predefined operation does not fit.
+- `weather_information` for live current conditions and today's forecast for a
+  validated city through the approved Open-Meteo integration.
 - Multiple tools, only when separate requested parts genuinely require separate
   sources; results are synthesized with source attribution and partial-failure
   handling.
@@ -362,13 +396,15 @@ What is the fictional organization's general contact email?
 Where is its main office?
 What about its service categories?
 Explain what retrieval-augmented generation means.
+What's the weather in Arlington today?
+Where is the main office, and what's the weather there today?
 ```
 
 The organization data is deliberately fictional and stored separately from
 the indexed PDF. It is not USCRI, university, personal, or private
 organizational information.
 
-The agent currently has three read-only tools and process-local conversation
+The agent currently has four read-only tools and process-local conversation
 memory. Follow-up questions receive retained user/assistant turns and any
 ordered tool-call context required by the Responses API. Enter `/clear` to
 remove the current session history without exiting.
@@ -648,6 +684,8 @@ predefined operations remain available as the preferred fallback when they fit.
   subset and the checked-in fictional schema only.
 - Structured organization data is static sample data, not a production system
   of record.
+- Live weather depends on Open-Meteo availability and supports only city-based
+  current conditions and today's forecast.
 - Agent memory is not shared across processes and is not durable.
 - Agent tool selection does not yet have a labeled evaluation benchmark.
 - There is no authentication or user authorization.

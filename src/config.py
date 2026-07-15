@@ -32,6 +32,8 @@ class Settings:
     agent_max_tool_iterations: int = 2
     agent_max_tool_calls_per_turn: int = 3
     agent_memory_max_turns: int = 10
+    external_api_timeout_seconds: float = 5.0
+    external_api_max_retries: int = 2
     sql_server: str = "YEABSIRA"
     sql_database: str = "NGO_RAG"
     sql_driver: str = "ODBC Driver 18 for SQL Server"
@@ -86,6 +88,17 @@ class Settings:
         if self.agent_memory_max_turns <= 0:
             raise ConfigurationError(
                 "AGENT_MEMORY_MAX_TURNS must be greater than zero."
+            )
+        if (
+            not math.isfinite(self.external_api_timeout_seconds)
+            or self.external_api_timeout_seconds <= 0
+        ):
+            raise ConfigurationError(
+                "EXTERNAL_API_TIMEOUT_SECONDS must be a finite value greater than zero."
+            )
+        if self.external_api_max_retries < 0:
+            raise ConfigurationError(
+                "EXTERNAL_API_MAX_RETRIES cannot be negative."
             )
         if not self.sql_server.strip() or not self.sql_database.strip():
             raise ConfigurationError("SQL_SERVER and SQL_DATABASE must not be empty.")
@@ -157,6 +170,12 @@ class Settings:
             ),
             agent_memory_max_turns=_read_int(
                 env, "AGENT_MEMORY_MAX_TURNS", 10
+            ),
+            external_api_timeout_seconds=_read_float(
+                env, "EXTERNAL_API_TIMEOUT_SECONDS", 5.0
+            ),
+            external_api_max_retries=_read_int(
+                env, "EXTERNAL_API_MAX_RETRIES", 2
             ),
             sql_server=env.get("SQL_SERVER", "YEABSIRA"),
             sql_database=env.get("SQL_DATABASE", "NGO_RAG"),

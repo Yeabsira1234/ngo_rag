@@ -59,6 +59,8 @@ def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> Non
     document_tool = object()
     organization_tool = object()
     sql_tool = object()
+    weather_tool = object()
+    weather_client = object()
     sql_repository = object()
     connection_factory = object()
     memory = object()
@@ -70,6 +72,8 @@ def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> Non
     tool_class = Mock(return_value=document_tool)
     organization_tool_class = Mock(return_value=organization_tool)
     sql_tool_class = Mock(return_value=sql_tool)
+    weather_tool_class = Mock(return_value=weather_tool)
+    weather_client_class = Mock(return_value=weather_client)
     repository_class = Mock(return_value=sql_repository)
     connection_factory_builder = Mock(return_value=connection_factory)
     agent_class = Mock(return_value=agent_service)
@@ -84,6 +88,8 @@ def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> Non
     )
     monkeypatch.setattr(application, "AgentService", agent_class)
     monkeypatch.setattr(application, "SQLQueryTool", sql_tool_class)
+    monkeypatch.setattr(application, "WeatherInformationTool", weather_tool_class)
+    monkeypatch.setattr(application, "OpenMeteoClient", weather_client_class)
     monkeypatch.setattr(application, "SQLServerRepository", repository_class)
     monkeypatch.setattr(application, "build_connection_factory", connection_factory_builder)
     monkeypatch.setattr(application, "InMemoryConversationMemory", memory_class)
@@ -106,12 +112,17 @@ def test_build_agent_service_injects_model_and_document_tool(monkeypatch) -> Non
     )
     sql_tool_class.assert_called_once()
     assert sql_tool_class.call_args.args[0] is sql_repository
+    weather_client_class.assert_called_once_with(
+        timeout_seconds=settings.external_api_timeout_seconds,
+        max_retries=settings.external_api_max_retries,
+    )
+    weather_tool_class.assert_called_once_with(weather_client)
     memory_class.assert_called_once_with(
         max_turns=settings.agent_memory_max_turns
     )
     agent_class.assert_called_once_with(
         model=model,
-        tools=(document_tool, organization_tool, sql_tool),
+        tools=(document_tool, organization_tool, sql_tool, weather_tool),
         memory=memory,
         max_tool_iterations=settings.agent_max_tool_iterations,
         max_tool_calls_per_turn=settings.agent_max_tool_calls_per_turn,

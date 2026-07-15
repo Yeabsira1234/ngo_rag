@@ -103,6 +103,7 @@ class AgentStatus(str, Enum):
     DOCUMENT_ANSWER = "document_answer"
     ORGANIZATION_ANSWER = "organization_answer"
     SQL_ANSWER = "sql_answer"
+    WEATHER_ANSWER = "weather_answer"
     INVALID_QUESTION = "invalid_question"
     TOOL_ERROR = "tool_error"
     MAX_ITERATIONS = "max_iterations"
@@ -135,6 +136,7 @@ class ToolProvenance(str, Enum):
     DOCUMENT = "document"
     STRUCTURED_ORGANIZATION_DATA = "structured_organization_data"
     STRUCTURED_SQL_DATA = "structured_sql_data"
+    EXTERNAL_API = "external_api"
 
 
 @dataclass(frozen=True, slots=True)

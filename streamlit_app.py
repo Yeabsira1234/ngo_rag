@@ -104,6 +104,7 @@ def render_message(message: ChatMessage) -> None:
                 "document_search": "Document search",
                 "organization_info": "Organization information",
                 "sql_query": "Structured database",
+                "weather_information": "Live weather",
             }
             rendered = [labels.get(tool, "Application tool") for tool in message.tools_used]
             st.caption(f"Tools used: {', '.join(rendered)}")

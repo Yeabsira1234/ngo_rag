@@ -1,6 +1,8 @@
 import json
 from unittest.mock import Mock
 
+import pytest
+
 from src.agent.memory import InMemoryConversationMemory
 from src.agent.models import (
     AgentCitation,
@@ -12,7 +14,7 @@ from src.agent.models import (
     ToolExecutionStatus,
     ToolProvenance,
 )
-from src.agent.service import AgentService
+from src.agent.service import AgentDependencyError, AgentService
 from src.agent.tools import SQLQueryTool
 from src.sql.models import SQLOperation, SQLQueryResult
 
@@ -396,3 +398,114 @@ def test_fully_failed_multi_tool_turn_does_not_commit_memory() -> None:
     ).answer("Use both unavailable sources")
     assert "Neither requested source" in response.answer
     assert memory.get_state().turns == ()
+
+
+def test_weather_question_selects_only_weather_tool() -> None:
+    weather = tool("weather_information", ToolProvenance.EXTERNAL_API)
+    document = tool("document_search", ToolProvenance.DOCUMENT)
+    model = Mock()
+    model.respond.side_effect = [
+        AgentModelResponse(
+            "",
+            (ToolCall("weather", "weather_information", '{"city":"Arlington"}'),),
+            ({"type": "function_call", "call_id": "weather"},),
+        ),
+        AgentModelResponse(
+            "Arlington is warm today.", (),
+            ({"role": "assistant", "content": "Arlington is warm today."},),
+        ),
+    ]
+    response = AgentService(
+        model=model, tools=(document, weather), memory=InMemoryConversationMemory()
+    ).answer("What's the weather in Arlington today?")
+    assert response.status is AgentStatus.WEATHER_ANSWER
+    assert response.tool_sources == ("weather_information",)
+    weather.execute.assert_called_once_with({"city": "Arlington"})
+    document.execute.assert_not_called()
+
+
+def test_sql_and_weather_are_combined_in_planned_order() -> None:
+    order: list[str] = []
+    sql = tool("sql_query", ToolProvenance.STRUCTURED_SQL_DATA)
+    weather = tool("weather_information", ToolProvenance.EXTERNAL_API)
+    sql.execute.side_effect = lambda arguments: (
+        order.append("sql_query") or sql.execute.return_value
+    )
+    weather.execute.side_effect = lambda arguments: (
+        order.append("weather_information") or weather.execute.return_value
+    )
+    model = _multi_model(
+        ToolCall("sql", "sql_query", '{"operation":"list_offices"}'),
+        ToolCall("weather", "weather_information", '{"city":"Alexandria"}'),
+    )
+    response = AgentService(
+        model=model, tools=(sql, weather), memory=InMemoryConversationMemory()
+    ).answer("List offices and give Alexandria weather")
+    assert order == ["sql_query", "weather_information"]
+    assert response.tool_sources == ("sql_query", "weather_information")
+
+
+def test_organization_and_weather_are_combined_in_planned_order() -> None:
+    organization = tool(
+        "organization_info", ToolProvenance.STRUCTURED_ORGANIZATION_DATA
+    )
+    weather = tool("weather_information", ToolProvenance.EXTERNAL_API)
+    model = _multi_model(
+        ToolCall(
+            "org", "organization_info", '{"category":"main_office_location"}'
+        ),
+        ToolCall("weather", "weather_information", '{"city":"Alexandria"}'),
+    )
+    response = AgentService(
+        model=model,
+        tools=(organization, weather),
+        memory=InMemoryConversationMemory(),
+    ).answer("Where is the office and what is the weather there?")
+    assert response.tool_sources == ("organization_info", "weather_information")
+    assert model.respond.call_args_list[1].kwargs["tools"] == ()
+
+
+def test_document_question_does_not_call_weather_tool() -> None:
+    document = tool("document_search", ToolProvenance.DOCUMENT)
+    weather = tool("weather_information", ToolProvenance.EXTERNAL_API)
+    model = Mock()
+    model.respond.side_effect = [
+        AgentModelResponse(
+            "",
+            (ToolCall("doc", "document_search", '{"question":"Train Dreams author"}'),),
+            ({"type": "function_call", "call_id": "doc"},),
+        ),
+        AgentModelResponse(
+            "The indexed document identifies the author.", (),
+            ({"role": "assistant", "content": "The indexed document identifies the author."},),
+        ),
+    ]
+    AgentService(
+        model=model, tools=(document, weather), memory=InMemoryConversationMemory()
+    ).answer("Who wrote Train Dreams?")
+    document.execute.assert_called_once()
+    weather.execute.assert_not_called()
+
+
+def test_weather_dependency_failure_does_not_corrupt_existing_memory() -> None:
+    weather = tool("weather_information", ToolProvenance.EXTERNAL_API)
+    weather.execute.side_effect = RuntimeError("network detail")
+    model = Mock()
+    model.respond.side_effect = [
+        AgentModelResponse(
+            "A retained answer.", (),
+            ({"role": "assistant", "content": "A retained answer."},),
+        ),
+        AgentModelResponse(
+            "",
+            (ToolCall("weather", "weather_information", '{"city":"Arlington"}'),),
+            ({"type": "function_call", "call_id": "weather"},),
+        ),
+    ]
+    memory = InMemoryConversationMemory()
+    service = AgentService(model=model, tools=(weather,), memory=memory)
+    service.answer("Remember this")
+    with pytest.raises(AgentDependencyError):
+        service.answer("What's the weather?")
+    assert len(memory.get_state().turns) == 1
+    assert memory.get_state().turns[0].assistant_message.content == "A retained answer."

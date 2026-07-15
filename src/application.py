@@ -3,7 +3,12 @@ from openai import OpenAI
 from src.agent.openai_model import OpenAIAgentModel
 from src.agent.memory import InMemoryConversationMemory
 from src.agent.service import AgentService
-from src.agent.tools import DocumentSearchTool, OrganizationInfoTool, SQLQueryTool
+from src.agent.tools import (
+    DocumentSearchTool,
+    OrganizationInfoTool,
+    SQLQueryTool,
+    WeatherInformationTool,
+)
 from src.config import Settings
 from src.embeddings.openai_embeddings import OpenAIEmbeddingService
 from src.llm.openai_llm import OpenAILLMService
@@ -20,6 +25,7 @@ from src.sql.generation import OpenAISQLGenerator
 from src.sql.natural_language import NaturalLanguageSQLService
 from src.sql.schema import APPROVED_SCHEMA
 from src.sql.validation import SQLValidator
+from src.external_api.client import OpenMeteoClient
 
 
 def build_rag_service(settings: Settings) -> RAGService:
@@ -83,6 +89,10 @@ def build_agent_service(settings: Settings) -> AgentService:
         validator=SQLValidator(APPROVED_SCHEMA, settings.sql_max_rows),
         repository=sql_repository,
     )
+    weather_client = OpenMeteoClient(
+        timeout_seconds=settings.external_api_timeout_seconds,
+        max_retries=settings.external_api_max_retries,
+    )
     return AgentService(
         model=model,
         tools=(
@@ -92,6 +102,7 @@ def build_agent_service(settings: Settings) -> AgentService:
                 sql_repository,
                 natural_language_sql,
             ),
+            WeatherInformationTool(weather_client),
         ),
         memory=InMemoryConversationMemory(
             max_turns=settings.agent_memory_max_turns

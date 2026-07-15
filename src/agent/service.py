@@ -23,7 +23,7 @@ class AgentService:
     REPEATED_TOOL_CALL_MESSAGE = AgentTurnGraph.REPEATED_TOOL_CALL_MESSAGE
     DEPENDENCY_ERROR_MESSAGE = AgentTurnGraph.DEPENDENCY_ERROR_MESSAGE
     INSTRUCTIONS = (
-        "You are a helpful assistant with three tools. Use document_search for "
+        "You are a helpful assistant with four tools. Use document_search for "
         "questions about contents, policies, procedures, or facts in the indexed "
         "document. Use organization_info for structured facts in the fictional "
         "sample organization directory, such as its name, support hours, contact "
@@ -35,7 +35,10 @@ class AgentService:
         "for recent, latest, or 'most recent' service events must use the predefined "
         "recent_service_events operation, not natural_language_query. Pass the complete "
         "user question and do not compose multiple predefined SQL calls. Predefined "
-        "operations remain available only when one operation fits exactly. Answer "
+        "operations remain available only when one operation fits exactly. Use "
+        "weather_information only for live current weather or today's forecast in a "
+        "named city. Do not use it for general knowledge, document questions, historical "
+        "weather, organization facts, or database facts. Answer "
         "directly only when no tool is necessary. When a question genuinely asks for "
         "facts from multiple sources, select all required tools together in the order "
         "their evidence should be gathered; do not add unrelated tools. The application "

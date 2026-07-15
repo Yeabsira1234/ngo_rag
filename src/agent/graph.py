@@ -375,6 +375,7 @@ class AgentTurnGraph:
             "document_search": "Retrieve relevant indexed-document guidance.",
             "organization_info": "Retrieve the requested organization-directory fact.",
             "sql_query": "Retrieve the requested bounded structured database fact.",
+            "weather_information": "Retrieve requested live weather for a named city.",
         }.get(tool_name, "Retrieve requested application evidence.")
 
     @staticmethod
@@ -472,6 +473,7 @@ class AgentTurnGraph:
             "document_search": ToolProvenance.DOCUMENT,
             "organization_info": ToolProvenance.STRUCTURED_ORGANIZATION_DATA,
             "sql_query": ToolProvenance.STRUCTURED_SQL_DATA,
+            "weather_information": ToolProvenance.EXTERNAL_API,
         }[tool_name]
         return ToolExecutionResult(
             answer=f"The {tool_name} request could not be completed safely.",
@@ -524,6 +526,7 @@ class AgentTurnGraph:
             + " Synthesize the completed tool outputs into one concise answer. Answer "
             "every requested part, keep database facts, organization-directory facts, "
             "and indexed-document guidance clearly attributed to their own sources. "
+            "Attribute live weather only to the external weather service. "
             "Treat insufficient_context, not_found, and error outputs as missing evidence; "
             "state that limitation while preserving useful successful results. Do not "
             "invent relationships, expose the execution plan, raw arguments, or SQL."
@@ -593,6 +596,8 @@ class AgentTurnGraph:
                 status = AgentStatus.ORGANIZATION_ANSWER
             elif ToolProvenance.STRUCTURED_SQL_DATA in provenance:
                 status = AgentStatus.SQL_ANSWER
+            elif ToolProvenance.EXTERNAL_API in provenance:
+                status = AgentStatus.WEATHER_ANSWER
             else:
                 status = AgentStatus.DIRECT_ANSWER
         return {

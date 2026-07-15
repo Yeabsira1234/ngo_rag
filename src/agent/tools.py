@@ -15,6 +15,11 @@ from src.agent.organization_data import (
     SampleOrganizationInfo,
 )
 from src.rag_service import RAGService
+from src.external_api.client import (
+    OpenMeteoClient,
+    WeatherAPIError,
+    WeatherLocationNotFoundError,
+)
 from src.sql.models import SQLOperation
 from src.sql.repository import SQLServerRepository, SQLToolError
 from src.sql.generation import SQLGenerationError
@@ -165,6 +170,89 @@ class OrganizationInfoTool:
             category=category.value,
         )
 
+
+class WeatherInformationTool:
+    """Expose approved current and same-day Open-Meteo information."""
+
+    NAME = "weather_information"
+    SAFE_ERROR_MESSAGE = "Live weather information could not be retrieved safely."
+    NOT_FOUND_MESSAGE = "No matching city was found for the weather request."
+
+    def __init__(self, client: OpenMeteoClient) -> None:
+        self.client = client
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.NAME,
+            description=(
+                "Retrieve live current weather and today's forecast for a city using "
+                "the approved read-only Open-Meteo service. Use only for live weather "
+                "questions, not document, organization-directory, database, historical "
+                "weather, or general-knowledge questions."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "city": {
+                        "type": "string",
+                        "description": (
+                            "A city name, optionally including state or country, such as "
+                            "Arlington, Virginia or Washington DC."
+                        ),
+                    }
+                },
+                "required": ["city"],
+                "additionalProperties": False,
+            },
+        )
+
+    def execute(self, arguments: Mapping[str, Any]) -> ToolExecutionResult:
+        if set(arguments) != {"city"}:
+            raise ValueError("weather_information requires only the city argument.")
+        city = arguments.get("city")
+        if not isinstance(city, str) or not city.strip():
+            raise ValueError("weather_information city must be non-empty text.")
+        try:
+            report = self.client.weather_for_city(city)
+        except WeatherLocationNotFoundError:
+            return self._failure(
+                self.NOT_FOUND_MESSAGE,
+                ToolExecutionStatus.NOT_FOUND,
+                "weather_location_not_found",
+            )
+        except WeatherAPIError:
+            return self._failure(
+                self.SAFE_ERROR_MESSAGE,
+                ToolExecutionStatus.ERROR,
+                "weather_api_failure",
+            )
+        return ToolExecutionResult(
+            answer=json.dumps(report.to_model_output()),
+            status=ToolExecutionStatus.ANSWERED,
+            citations=(),
+            rag_llm_called=False,
+            source=self.NAME,
+            provenance=ToolProvenance.EXTERNAL_API,
+            category="current_and_today_forecast",
+        )
+
+    def _failure(
+        self,
+        message: str,
+        status: ToolExecutionStatus,
+        category: str,
+    ) -> ToolExecutionResult:
+        return ToolExecutionResult(
+            answer=message,
+            status=status,
+            citations=(),
+            rag_llm_called=False,
+            source=self.NAME,
+            provenance=ToolProvenance.EXTERNAL_API,
+            category=category,
+            failure_category=category if status is ToolExecutionStatus.ERROR else None,
+        )
 
 class SQLQueryTool:
     """Expose only predefined, parameterized, read-only SQL operations."""

@@ -24,6 +24,8 @@ def test_settings_use_current_application_defaults() -> None:
     assert settings.agent_max_tool_iterations == 2
     assert settings.agent_max_tool_calls_per_turn == 3
     assert settings.agent_memory_max_turns == 10
+    assert settings.external_api_timeout_seconds == 5.0
+    assert settings.external_api_max_retries == 2
     assert settings.sql_server == "YEABSIRA"
     assert settings.sql_database == "NGO_RAG"
     assert settings.sql_query_timeout_seconds == 10
@@ -48,6 +50,8 @@ def test_settings_read_environment_overrides() -> None:
             "AGENT_MAX_TOOL_ITERATIONS": "3",
             "AGENT_MAX_TOOL_CALLS_PER_TURN": "2",
             "AGENT_MEMORY_MAX_TURNS": "7",
+            "EXTERNAL_API_TIMEOUT_SECONDS": "7.5",
+            "EXTERNAL_API_MAX_RETRIES": "4",
             "LOG_LEVEL": "debug",
         }
     )
@@ -66,6 +70,8 @@ def test_settings_read_environment_overrides() -> None:
     assert settings.agent_max_tool_iterations == 3
     assert settings.agent_max_tool_calls_per_turn == 2
     assert settings.agent_memory_max_turns == 7
+    assert settings.external_api_timeout_seconds == 7.5
+    assert settings.external_api_max_retries == 4
     assert settings.log_level == "DEBUG"
 
 
@@ -149,3 +155,16 @@ def test_settings_reject_invalid_agent_tool_call_limit() -> None:
                 "AGENT_MAX_TOOL_CALLS_PER_TURN": "0",
             }
         )
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("EXTERNAL_API_TIMEOUT_SECONDS", "0"),
+        ("EXTERNAL_API_TIMEOUT_SECONDS", "nan"),
+        ("EXTERNAL_API_MAX_RETRIES", "-1"),
+    ],
+)
+def test_settings_reject_invalid_external_api_limits(name: str, value: str) -> None:
+    with pytest.raises(ConfigurationError, match=name):
+        Settings.from_env({"OPENAI_API_KEY": "test-key", name: value})
