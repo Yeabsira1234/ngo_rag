@@ -40,7 +40,7 @@ QUERIES: dict[SQLOperation, str] = {
     SQLOperation.LIST_STAFF_BY_OFFICE: """SELECT s.StaffID, s.FirstName, s.LastName, s.JobTitle, s.Department, o.OfficeName FROM dbo.Staff AS s INNER JOIN dbo.Offices AS o ON o.OfficeID = s.OfficeID WHERE o.OfficeName = ? AND s.IsActive = 1 ORDER BY s.LastName, s.FirstName, s.StaffID""",
     SQLOperation.LIST_OPEN_CASES: """SELECT c.CaseID, cl.ClientCode, p.ProgramName, c.OpenDate, c.PriorityLevel, c.CaseStatus FROM dbo.Cases AS c INNER JOIN dbo.Clients AS cl ON cl.ClientID = c.ClientID INNER JOIN dbo.Programs AS p ON p.ProgramID = c.ProgramID WHERE c.CloseDate IS NULL ORDER BY c.OpenDate DESC, c.CaseID DESC""",
     SQLOperation.COUNT_CLIENTS_BY_LANGUAGE: """SELECT PreferredLanguage, COUNT_BIG(*) AS ClientCount FROM dbo.Clients WHERE PreferredLanguage = ? GROUP BY PreferredLanguage ORDER BY PreferredLanguage""",
-    SQLOperation.RECENT_SERVICE_EVENTS: """SELECT se.ServiceEventID, cl.ClientCode, se.ServiceType, se.ServiceDate, se.DurationMinutes, se.Outcome FROM dbo.ServiceEvents AS se INNER JOIN dbo.Cases AS c ON c.CaseID = se.CaseID INNER JOIN dbo.Clients AS cl ON cl.ClientID = c.ClientID ORDER BY se.ServiceDate DESC, se.ServiceEventID DESC""",
+    SQLOperation.RECENT_SERVICE_EVENTS: """SELECT TOP (5) se.ServiceEventID, cl.ClientCode, se.ServiceType, se.ServiceDate, se.DurationMinutes, se.Outcome FROM dbo.ServiceEvents AS se INNER JOIN dbo.Cases AS c ON c.CaseID = se.CaseID INNER JOIN dbo.Clients AS cl ON cl.ClientID = c.ClientID ORDER BY se.ServiceDate DESC, se.ServiceEventID DESC""",
 }
 
 

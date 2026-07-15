@@ -52,7 +52,11 @@ Direct RAG question
 Agent question
   -> agent_chat.py or streamlit_app.py
   -> AgentService
-      -> InMemoryConversationMemory (complete session turns)
+      -> AgentTurnGraph (temporary typed turn state)
+          -> validate_input -> call_model -> route_model_output
+          -> execute_tools -> record_tool_results -> check_iteration_limit
+          -> finalize_response -> commit_memory
+      -> InMemoryConversationMemory (complete committed session turns)
       -> OpenAIAgentModel (select a tool or answer directly)
       -> ToolRegistry
           -> DocumentSearchTool -> existing RAGService
@@ -69,6 +73,50 @@ relevance-filtering, prompt-building, tool-routing, or memory logic.
 selection, safe tool dispatch, bounded tool calls, and conversation memory.
 Streamlit and `agent_chat.py` use `AgentService`; the direct `chat.py` CLI and
 FastAPI endpoint continue to use `RAGService` without agent behavior.
+
+### LangGraph agent orchestration
+
+LangGraph was introduced to make the agent's one-turn control flow explicit and
+inspectable while preserving `AgentService.answer()` as the stable application
+interface. The project uses the low-level `StateGraph` API directly; OpenAI,
+Chroma, SQL, memory, and tool implementations remain the existing typed project
+components rather than LangChain abstractions.
+
+```mermaid
+flowchart TD
+    S([START]) --> V[validate_input]
+    V -->|valid| M[call_model]
+    V -->|invalid| F[finalize_response]
+    M --> R[route_model_output]
+    R -->|final answer| F
+    R -->|tool calls| T[execute_tools]
+    R -->|limit| L[finalize_limit_reached]
+    R -->|dependency failure| E[handle_dependency_failure]
+    T -->|success| O[record_tool_results]
+    T -->|safe rejection| F
+    T -->|dependency failure| E
+    O --> I[check_iteration_limit]
+    I --> M
+    F -->|successful completion| C[commit_memory]
+    F -->|non-committing outcome| X([END])
+    C --> X
+    L --> X
+```
+
+Temporary `AgentTurnState` contains only one question's retained model items,
+pending calls, ordered tool results, citations, provenance, iteration count,
+status, and failure category. Infrastructure dependencies remain injected into
+node callables and are not stored in graph state. Existing
+`InMemoryConversationMemory` remains session-scoped and separate; LangGraph
+checkpointers are not enabled. Only a successfully finalized response reaches
+`commit_memory`.
+
+The graph preserves the document, organization, predefined SQL, and safe
+natural-language SQL tools. It canonicalizes call arguments to stop equivalent
+repeated calls, permits at most one natural-language SQL operation per turn,
+and retains the configured maximum tool-iteration boundary. Persistent
+checkpointers and human approval nodes are deferred to later persistence and
+LLMOps work.
 
 ## Repository structure
 
@@ -557,6 +605,8 @@ predefined operations remain available as the preferred fallback when they fit.
 - The relevance threshold has not been evaluated on a labeled benchmark.
 - Re-ingestion does not yet remove stale records when chunk identifiers change.
 - Streamlit agent memory is isolated per browser session but is not durable.
+- LangGraph turn state is ephemeral; persistent checkpointers and resumable
+  human-approval workflows are not enabled yet.
 - Natural-language SQL supports a deliberately limited SQL Server `SELECT`
   subset and the checked-in fictional schema only.
 - Structured organization data is static sample data, not a production system

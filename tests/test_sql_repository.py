@@ -90,6 +90,13 @@ def test_generated_query_uses_parameters_and_independent_row_cap() -> None:
     assert result.truncated is True
 
 
+def test_recent_service_events_predefined_query_is_bounded_to_five() -> None:
+    repository, cursor = _repository([])
+    repository.execute(SQLOperation.RECENT_SERVICE_EVENTS, {})
+    query = cursor.execute.call_args.args[0]
+    assert "SELECT TOP (5)" in query
+
+
 @pytest.mark.parametrize("parameters", [{}, {"office_name": ""}, {"extra": "x"}])
 def test_required_parameters_are_validated(parameters) -> None:
     repository, _ = _repository([])

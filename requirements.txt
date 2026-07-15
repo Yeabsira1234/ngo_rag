@@ -7,3 +7,4 @@ fastapi>=0.139,<0.140
 uvicorn>=0.51,<0.52
 pytest>=9.1,<10
 pyodbc>=5.2,<6
+langgraph>=1.2,<2

@@ -121,6 +121,7 @@ class ToolExecutionResult:
     source: str
     provenance: ToolProvenance
     category: str | None = None
+    failure_category: str | None = None
 
     def to_model_output(self) -> dict[str, Any]:
         return {
@@ -141,4 +142,5 @@ class ToolExecutionResult:
             "source": self.source,
             "provenance": self.provenance.value,
             "category": self.category,
+            "failure_category": self.failure_category,
         }

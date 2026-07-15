@@ -195,7 +195,9 @@ class SQLQueryTool:
                 "read-only operation. Use natural_language_query with question "
                 "for rankings, comparisons, grouped counts, most-common questions, "
                 "or any flexible aggregate question; answer these with one natural "
-                "language operation rather than chaining predefined operations. Use office_name "
+                "language operation rather than chaining predefined operations. "
+                "Use recent_service_events for recent, latest, or 'most recent' service "
+                "event requests. Use office_name "
                 "only for office-filtered predefined operations and language only "
                 "for count_clients_by_language."
             ),
@@ -238,9 +240,17 @@ class SQLQueryTool:
             try:
                 result = self.natural_language_service.query(question.strip())
             except (SQLGenerationError, SQLValidationError):
-                return self._safe_error(self.POLICY_ERROR_MESSAGE, operation)
+                return self._safe_error(
+                    self.POLICY_ERROR_MESSAGE,
+                    operation,
+                    "sql_policy_rejection",
+                )
             except SQLToolError:
-                return self._safe_error(self.SAFE_ERROR_MESSAGE, operation)
+                return self._safe_error(
+                    self.SAFE_ERROR_MESSAGE,
+                    operation,
+                    "sql_execution_failure",
+                )
             return self._answered(result, operation)
         parameters = {
             key: value
@@ -250,10 +260,19 @@ class SQLQueryTool:
         try:
             result = self.repository.execute(operation, parameters)
         except SQLToolError:
-            return self._safe_error(self.SAFE_ERROR_MESSAGE, operation)
+            return self._safe_error(
+                self.SAFE_ERROR_MESSAGE,
+                operation,
+                "sql_execution_failure",
+            )
         return self._answered(result, operation)
 
-    def _safe_error(self, message: str, operation: SQLOperation) -> ToolExecutionResult:
+    def _safe_error(
+        self,
+        message: str,
+        operation: SQLOperation,
+        failure_category: str,
+    ) -> ToolExecutionResult:
         return ToolExecutionResult(
             answer=message,
             status=ToolExecutionStatus.ERROR,
@@ -262,6 +281,7 @@ class SQLQueryTool:
             source=self.NAME,
             provenance=ToolProvenance.STRUCTURED_SQL_DATA,
             category=operation.value,
+            failure_category=failure_category,
         )
 
     def _answered(self, result: Any, operation: SQLOperation) -> ToolExecutionResult:
