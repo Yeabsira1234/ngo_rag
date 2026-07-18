@@ -1,0 +1,46 @@
+name: ngo-ai-assistant
+
+services:
+  fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ngo-ai-assistant-api:compose
+    env_file:
+      - .env
+    environment:
+      CHROMA_PERSIST_DIRECTORY: /app/chroma_data
+    ports:
+      - "8000:8000"
+    volumes:
+      - fastapi_chroma:/app/chroma_data
+      - fastapi_logs:/app/logs
+    init: true
+    restart: unless-stopped
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    image: ngo-ai-assistant-streamlit:compose
+    env_file:
+      - .env
+    environment:
+      CHROMA_PERSIST_DIRECTORY: /app/chroma_data
+      DOCUMENTS_DIRECTORY: /app/data/samples
+      UPLOAD_DIRECTORY: /app/data/uploads
+    ports:
+      - "8501:8501"
+    volumes:
+      - streamlit_chroma:/app/chroma_data
+      - streamlit_uploads:/app/data/uploads
+      - streamlit_logs:/app/logs
+    init: true
+    restart: unless-stopped
+
+volumes:
+  fastapi_chroma:
+  fastapi_logs:
+  streamlit_chroma:
+  streamlit_uploads:
+  streamlit_logs:
