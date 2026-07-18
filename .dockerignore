@@ -48,7 +48,6 @@ agent_chat.py
 chat.py
 ingest.py
 mcp_server.py
-streamlit_app.py
 
 # Operating-system noise
 .DS_Store
