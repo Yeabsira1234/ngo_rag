@@ -1,0 +1,56 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Version control and editor state
+.git
+.gitignore
+.gitattributes
+.github
+.agents
+.codex
+.vscode
+.idea
+*.code-workspace
+
+# Python environments and generated files
+.venv
+venv
+env
+__pycache__
+**/__pycache__
+*.py[cod]
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Tests and local development artifacts
+tests
+logs
+*.log
+
+# Generated databases and application data
+chroma_data
+data/private
+data/uploads
+data/**/*.pdf
+
+# Non-FastAPI entry points are not part of this image
+agent_chat.py
+chat.py
+ingest.py
+mcp_server.py
+streamlit_app.py
+
+# Operating-system noise
+.DS_Store
+Thumbs.db
+Desktop.ini
